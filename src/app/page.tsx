@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { TrackData, AlbumSummary, PlaylistData } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
-import { Sparkles, UploadCloud, Library, Play, Compass, Disc, Radio, ExternalLink } from 'lucide-react';
+import { Sparkles, UploadCloud, Library, Disc, Film } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function HomePage() {
-  const [greeting, setGreeting] = useState('Welcome');
+  const [greeting, setGreeting] = useState('Good music');
   const [recentTracks, setRecentTracks] = useState<TrackData[]>([]);
   const [hiResTracks, setHiResTracks] = useState<TrackData[]>([]);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
@@ -17,7 +17,7 @@ export default function HomePage() {
   const [openTracks, setOpenTracks] = useState<TrackData[]>([]);
   const [onlineTrending, setOnlineTrending] = useState<TrackData[]>([]);
   const [indianTracks, setIndianTracks] = useState<TrackData[]>([]);
-  const [selectedLanguage, setSelectedLanguage] = useState<'all' | 'tamil' | 'malayalam' | 'hindi'>('all');
+  const [selectedLanguage, setSelectedLanguage] = useState<'all' | 'tamil' | 'malayalam' | 'hindi' | 'global'>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,13 +56,20 @@ export default function HomePage() {
 
         if (searchRes.ok) {
           const data = await searchRes.json();
-          // Extract Indian mainstream music
           const indianProvider = data.results?.find((r: any) => r.providerCode === 'indian_music_vault');
           if (indianProvider) {
             setIndianTracks(indianProvider.tracks || []);
+            if (indianProvider.albums && indianProvider.albums.length > 0) {
+              setAlbums((prev) => {
+                const existingIds = new Set(prev.map((a) => a.id));
+                const newAlbums = (indianProvider.albums as AlbumSummary[]).filter(
+                  (a) => !existingIds.has(a.id)
+                );
+                return [...prev, ...newAlbums];
+              });
+            }
           }
 
-          // Extract open-licensed and online trending catalogue items
           const openProvider = data.results?.find((r: any) => r.providerCode === 'open_licensed');
           if (openProvider) {
             setOpenTracks(openProvider.tracks || []);
@@ -85,6 +92,7 @@ export default function HomePage() {
 
   const hasAnyContent =
     recentTracks.length > 0 ||
+    albums.length > 0 ||
     openTracks.length > 0 ||
     onlineTrending.length > 0 ||
     indianTracks.length > 0;
@@ -92,7 +100,8 @@ export default function HomePage() {
   const filteredIndianTracks = indianTracks.filter((t) => {
     if (selectedLanguage === 'all') return true;
     const g = (t.genre || '').toLowerCase();
-    return g.includes(selectedLanguage);
+    const lang = selectedLanguage.toLowerCase();
+    return g.includes(lang);
   });
 
   return (
@@ -110,32 +119,39 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Hi-Res Lossless Audio Banner */}
-      <section className={styles.audiophileBanner}>
-        <div className={styles.bannerGlow} />
-        <div className={styles.bannerContent}>
-          <div className={styles.bannerBadge}>
-            <Sparkles size={12} />
-            <span>Audiophile Grade</span>
+      {/* Featured Movie Soundtracks & Albums */}
+      {albums.length > 0 && (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <Film size={18} className={styles.sectionIcon} />
+                <h2 className={styles.sectionTitle}>Featured Movie Soundtracks</h2>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Complete official soundtrack albums with full tracklists
+              </span>
+            </div>
           </div>
-          <h2 className={styles.bannerTitle}>Ad-Free Stream Engine</h2>
-          <p className={styles.bannerText}>
-            Stream direct 320kbps Tamil, Malayalam, Hindi, and Global tracks without ads. Full Lock Screen controls on iPhone.
-          </p>
-        </div>
-      </section>
+          <div className={styles.horizontalScroll}>
+            {albums.map((album) => (
+              <AlbumCard key={album.id} album={album} />
+            ))}
+          </div>
+        </section>
+      )}
 
-      {/* Mainstream Indian Hits Section (Tamil, Malayalam, Hindi) */}
+      {/* Top Trending Music Section */}
       {indianTracks.length > 0 && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
               <div className={styles.badgeRow}>
-                <h2 className={styles.sectionTitle}>Latest Indian Hits</h2>
-                <span className={styles.sectionBadge}>320 KBPS AAC</span>
+                <h2 className={styles.sectionTitle}>Trending Releases</h2>
+                <span className={styles.sectionBadge}>320 KBPS</span>
               </div>
               <span className={styles.sectionSubtitle}>
-                Top trending Tamil, Malayalam & Bollywood releases
+                Instant playback across Tamil, Malayalam, Hindi & Global charts
               </span>
             </div>
           </div>
@@ -147,7 +163,7 @@ export default function HomePage() {
               className={`${styles.filterPill} ${selectedLanguage === 'all' ? styles.filterPillActive : ''}`}
               onClick={() => setSelectedLanguage('all')}
             >
-              All Languages
+              All Releases
             </button>
             <button
               type="button"
@@ -170,6 +186,13 @@ export default function HomePage() {
             >
               Hindi (हिन्दी)
             </button>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${selectedLanguage === 'global' ? styles.filterPillActive : ''}`}
+              onClick={() => setSelectedLanguage('global')}
+            >
+              Global (English)
+            </button>
           </div>
 
           <div className={styles.trackList}>
@@ -185,20 +208,6 @@ export default function HomePage() {
               ))}
           </div>
         </section>
-      )}
-
-      {/* Empty State if completely blank */}
-      {!loading && !hasAnyContent && (
-        <div className={styles.emptyState}>
-          <Disc size={48} className={styles.emptyIcon} />
-          <h2>Your Audio Vault is Empty</h2>
-          <p>Import your own lossless FLAC files or stream authorized open-licensed tracks.</p>
-          <div className={styles.emptyActions}>
-            <Link href="/import" className={styles.primaryBtn}>
-              <UploadCloud size={18} /> Ingest FLAC / Audio Files
-            </Link>
-          </div>
-        </div>
       )}
 
       {/* Quick Playlists Bar */}
@@ -240,7 +249,7 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Recently Played / Library Tracks */}
+      {/* Recently Added Library Tracks */}
       {recentTracks.length > 0 && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
@@ -260,25 +269,13 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Albums Grid */}
-      {albums.length > 0 && (
-        <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Featured Albums</h2>
-          <div className={styles.horizontalScroll}>
-            {albums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Open-Licensed CC Audio Section */}
       {openTracks.length > 0 && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <h2 className={styles.sectionTitle}>Open-Licensed Master Recordings</h2>
-              <span className={styles.sectionSubtitle}>Authorized Creative Commons lossless streams</span>
+              <h2 className={styles.sectionTitle}>Audiophile Acoustic Masters</h2>
+              <span className={styles.sectionSubtitle}>Studio master recordings with lossless depth</span>
             </div>
           </div>
           <div className={styles.trackList}>
@@ -300,16 +297,16 @@ export default function HomePage() {
           <div className={styles.sectionHeaderRow}>
             <div>
               <div className={styles.badgeRow}>
-                <h2 className={styles.sectionTitle}>Online Free Music Vault</h2>
-                <span className={styles.sectionBadge}>1M+ AD-FREE TRACKS</span>
+                <h2 className={styles.sectionTitle}>Online Free Vault</h2>
+                <span className={styles.sectionBadge}>LOSSLESS STREAM</span>
               </div>
               <span className={styles.sectionSubtitle}>
-                Instant in-app streaming with zero advertisements or accounts
+                Global indie & electronic releases
               </span>
             </div>
           </div>
           <div className={styles.trackList}>
-            {onlineTrending.slice(0, 8).map((track, idx) => (
+            {onlineTrending.slice(0, 6).map((track, idx) => (
               <TrackListItem
                 key={track.id}
                 track={track}
@@ -321,17 +318,19 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Commercial Metadata Handoff Info */}
-      <section className={styles.handoffSection}>
-        <div className={styles.handoffHeader}>
-          <Radio size={18} className={styles.handoffIcon} />
-          <h3>Looking for Mainstream Catalogues?</h3>
+      {/* Empty State if completely blank */}
+      {!loading && !hasAnyContent && (
+        <div className={styles.emptyState}>
+          <Disc size={48} className={styles.emptyIcon} />
+          <h2>Your Audio Vault is Empty</h2>
+          <p>Import your own lossless FLAC files or stream authorized online tracks.</p>
+          <div className={styles.emptyActions}>
+            <Link href="/import" className={styles.primaryBtn}>
+              <UploadCloud size={18} /> Ingest FLAC / Audio Files
+            </Link>
+          </div>
         </div>
-        <p>
-          Copyright-protected commercial streaming services require proprietary apps and subscriptions.
-          Search in the Search tab to inspect metadata and initiate official handoffs to Apple Music or Spotify without ads or pirated streams.
-        </p>
-      </section>
+      )}
     </div>
   );
 }

@@ -5,6 +5,9 @@ import { usePlayerStore } from '@/store/playerStore';
 
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const isGraphConnectedRef = useRef<boolean>(false);
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
 
@@ -25,6 +28,38 @@ export const AudioEngine: React.FC = () => {
     setNetworkInterrupted,
     updatePlaybackProgress,
   } = usePlayerStore();
+
+  // Initialize Web Audio API GainNode for iOS Safari volume control
+  const setupAudioGraph = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || isGraphConnectedRef.current) return;
+
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtxClass();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const source = ctx.createMediaElementSource(audio);
+      const gainNode = ctx.createGain();
+      const targetVol = isMuted ? 0 : volume;
+      gainNode.gain.setValueAtTime(targetVol, ctx.currentTime);
+
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      gainNodeRef.current = gainNode;
+      isGraphConnectedRef.current = true;
+    } catch (err) {
+      console.warn('Web Audio gain graph init deferred or failed:', err);
+    }
+  }, [isMuted, volume]);
 
   // Helper to resolve playable URL
   const resolveTrackUrl = useCallback(async (track: typeof currentTrack): Promise<string | null> => {
@@ -174,6 +209,7 @@ export const AudioEngine: React.FC = () => {
       updateMediaSession(currentTrack);
 
       if (isPlaying) {
+        setupAudioGraph();
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -192,7 +228,7 @@ export const AudioEngine: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentTrack, isPlaying, resolveTrackUrl, updateMediaSession, setError, setIsLoading, setIsPlaying]);
+  }, [currentTrack, isPlaying, resolveTrackUrl, updateMediaSession, setError, setIsLoading, setIsPlaying, setupAudioGraph]);
 
   // Handle play / pause toggle
   useEffect(() => {
@@ -200,6 +236,11 @@ export const AudioEngine: React.FC = () => {
     if (!audio || !audio.src) return;
 
     if (isPlaying) {
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      setupAudioGraph();
+
       if (audio.paused) {
         const playPromise = audio.play();
         if (playPromise !== undefined) {
@@ -221,7 +262,7 @@ export const AudioEngine: React.FC = () => {
         navigator.mediaSession.playbackState = 'paused';
       }
     }
-  }, [isPlaying, setIsPlaying]);
+  }, [isPlaying, setIsPlaying, setupAudioGraph]);
 
   // Handle seek synchronization
   useEffect(() => {
@@ -234,12 +275,21 @@ export const AudioEngine: React.FC = () => {
     }
   }, [currentTime, updateMediaSessionPosition]);
 
-  // Handle volume / mute
+  // Handle volume / mute with both standard audio element and Web Audio API GainNode for iOS
   useEffect(() => {
+    const targetVolume = isMuted ? 0 : volume;
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.volume = isMuted ? 0 : volume;
-    audio.muted = isMuted;
+    if (audio) {
+      try {
+        audio.volume = targetVolume;
+        audio.muted = isMuted;
+      } catch {}
+    }
+    if (gainNodeRef.current && audioCtxRef.current) {
+      try {
+        gainNodeRef.current.gain.setValueAtTime(targetVolume, audioCtxRef.current.currentTime);
+      } catch {}
+    }
   }, [volume, isMuted]);
 
   // Setup audio event listeners
@@ -363,6 +413,7 @@ export const AudioEngine: React.FC = () => {
     <audio
       ref={audioRef}
       playsInline
+      crossOrigin="anonymous"
       preload="metadata"
       style={{ display: 'none' }}
       aria-hidden="true"

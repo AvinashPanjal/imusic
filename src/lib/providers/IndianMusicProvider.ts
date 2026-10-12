@@ -1,21 +1,22 @@
 import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult } from './types';
-import { TrackData } from '@/types/music';
+import { TrackData, AlbumSummary } from '@/types/music';
 import CryptoJS from 'crypto-js';
 
 const SAAVN_API_BASE = 'https://www.jiosaavn.com/api.php';
 const DES_KEY = '38346591';
 
-function decodeHtmlEntities(str: string): string {
+export function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
     .replace(/&quot;/g, '"')
     .replace(/&#039;/g, "'")
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec));
 }
 
-function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null {
+export function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null {
   if (!encryptedUrl) return null;
   try {
     const key = CryptoJS.enc.Utf8.parse(DES_KEY);
@@ -26,7 +27,7 @@ function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null
     const rawUrl = decrypted.toString(CryptoJS.enc.Utf8);
     if (!rawUrl || !rawUrl.startsWith('http')) return null;
 
-    // Prefer high-fidelity 320kbps AAC stream
+    // Prefer high-fidelity 320kbps stream
     return rawUrl.replace(/_96\.mp4$/, '_320.mp4');
   } catch (err) {
     console.warn('Failed decrypting Saavn media URL:', err);
@@ -36,22 +37,22 @@ function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null
 
 export class IndianMusicProvider implements CatalogueProvider {
   public readonly code = 'indian_music_vault';
-  public readonly name = 'Mainstream Indian Vault (Tamil, Malayalam, Hindi)';
-  public readonly description = 'Over 50 million latest Indian tracks with 320kbps high-fidelity in-app streaming';
+  public readonly name = 'Global & Indian Music Vault (Tamil, Malayalam, Hindi, English)';
+  public readonly description = 'Over 50 million latest Indian and Global tracks with 320kbps in-app streaming';
 
   public readonly capabilities: ProviderCapabilities = {
     canSearchMetadata: true,
     canFetchArtwork: true,
     canFetchMetadata: true,
-    canPlayFullTracks: true, // 100% direct in-app audio stream!
+    canPlayFullTracks: true,
     canPlayPreviews: false,
     canFetchLyrics: false,
-    canDownloadCache: true,  // Can download to IndexedDB for offline listening!
+    canDownloadCache: true,
     hasAudioQualityMetadata: true,
   };
 
   public getTermsNotice(): string {
-    return 'Full-length 320kbps high-quality audio streams for personal ad-free playback.';
+    return 'Direct 320kbps high-quality audio streams for personal ad-free playback.';
   }
 
   public async search(query: string): Promise<ProviderSearchResult> {
@@ -60,31 +61,50 @@ export class IndianMusicProvider implements CatalogueProvider {
     try {
       const queriesToRun = q
         ? [q]
-        : ['Tamil Trending', 'Malayalam Trending', 'Hindi Top Trending'];
+        : ['Tamil Trending 2024', 'Malayalam Trending 2024', 'Hindi Trending 2024', 'The Weeknd Trending'];
 
+      // Fetch songs and album results in parallel
       const searchPromises = queriesToRun.map(async (searchQuery) => {
-        const url = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=12&q=${encodeURIComponent(
+        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=12&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const res = await fetch(url, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept: 'application/json, text/plain, */*',
-          },
-          next: { revalidate: 300 }, // Cache 5 min
-        });
+        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=6&q=${encodeURIComponent(
+          searchQuery
+        )}`;
 
-        if (!res.ok) return [];
-        const json = await res.json();
-        return (json.results || []) as any[];
+        const headers = {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'application/json, text/plain, */*',
+        };
+
+        const [songRes, albumRes] = await Promise.all([
+          fetch(songUrl, { headers, next: { revalidate: 300 } }).catch(() => null),
+          fetch(albumUrl, { headers, next: { revalidate: 300 } }).catch(() => null),
+        ]);
+
+        let rawSongs: any[] = [];
+        let rawAlbums: any[] = [];
+
+        if (songRes && songRes.ok) {
+          const json = await songRes.json();
+          rawSongs = json.results || [];
+        }
+
+        if (albumRes && albumRes.ok) {
+          const json = await albumRes.json();
+          rawAlbums = json.results || [];
+        }
+
+        return { rawSongs, rawAlbums };
       });
 
-      const resultsArrays = await Promise.all(searchPromises);
-      const rawResults = resultsArrays.flat();
+      const batchResults = await Promise.all(searchPromises);
+      const rawResults = batchResults.flatMap((b) => b.rawSongs);
+      const rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
 
-      // Deduplicate by song ID
+      // Process and deduplicate songs
       const seenIds = new Set<string>();
       const tracks: TrackData[] = [];
 
@@ -95,13 +115,12 @@ export class IndianMusicProvider implements CatalogueProvider {
         const streamUrl = decryptMediaUrl(item.encrypted_media_url);
         if (!streamUrl) continue;
 
-        const title = decodeHtmlEntities(item.song);
+        const title = decodeHtmlEntities(item.song || item.title || 'Unknown Track');
         const albumName = decodeHtmlEntities(item.album || title);
         const artistNames = decodeHtmlEntities(
           item.primary_artists || item.singers || item.music || 'Various Artists'
         );
 
-        // High resolution 500x500 cover art
         const rawCover = item.image || '';
         const highResArtwork = rawCover
           ? rawCover.replace(/150x150\.jpg$/, '500x500.jpg').replace(/50x50\.jpg$/, '500x500.jpg')
@@ -114,7 +133,7 @@ export class IndianMusicProvider implements CatalogueProvider {
           id: `saavn-${item.id}`,
           title,
           duration,
-          genre: `${item.language ? item.language.toUpperCase() : 'INDIAN'} / Film Soundtrack`,
+          genre: `${item.language ? item.language.toUpperCase() : 'GLOBAL'} / Soundtrack`,
           album: {
             id: `saavn-album-${item.albumid || item.id}`,
             title: albumName,
@@ -148,7 +167,30 @@ export class IndianMusicProvider implements CatalogueProvider {
         });
       }
 
-      const albums = tracks.map((t) => t.album!).filter(Boolean);
+      // Process and deduplicate movie albums
+      const seenAlbumIds = new Set<string>();
+      const albums: AlbumSummary[] = [];
+
+      for (const al of rawAlbumResults) {
+        if (!al.albumid || seenAlbumIds.has(al.albumid)) continue;
+        seenAlbumIds.add(al.albumid);
+
+        const rawCover = al.image || '';
+        const highResCover = rawCover
+          ? rawCover.replace(/150x150\.jpg$/, '500x500.jpg')
+          : '/icons/default-artwork.png';
+
+        albums.push({
+          id: `saavn-album-${al.albumid}`,
+          title: decodeHtmlEntities(al.title),
+          coverImage: highResCover,
+          artistName: decodeHtmlEntities(al.music || al.primary_artists || 'Soundtrack'),
+          releaseYear: parseInt(al.year, 10) || 2024,
+          isLossless: true,
+          isHiRes: false,
+        });
+      }
+
       const artists = tracks.flatMap((t) => t.artists);
 
       return {
@@ -159,7 +201,7 @@ export class IndianMusicProvider implements CatalogueProvider {
         artists,
       };
     } catch (err) {
-      console.error('Indian music search error:', err);
+      console.error('Music search error:', err);
       return {
         providerCode: this.code,
         providerName: this.name,
@@ -188,7 +230,7 @@ export class IndianMusicProvider implements CatalogueProvider {
       const streamUrl = decryptMediaUrl(item.encrypted_media_url);
       if (!streamUrl) return null;
 
-      const title = decodeHtmlEntities(item.song);
+      const title = decodeHtmlEntities(item.song || item.title || 'Unknown Track');
       const albumName = decodeHtmlEntities(item.album || title);
       const artistNames = decodeHtmlEntities(
         item.primary_artists || item.singers || item.music || 'Various Artists'
@@ -199,7 +241,7 @@ export class IndianMusicProvider implements CatalogueProvider {
         id: `saavn-${item.id}`,
         title,
         duration: parseInt(item.duration, 10) || 210,
-        genre: `${item.language ? item.language.toUpperCase() : 'INDIAN'}`,
+        genre: `${item.language ? item.language.toUpperCase() : 'GLOBAL'}`,
         album: {
           id: `saavn-album-${item.albumid}`,
           title: albumName,

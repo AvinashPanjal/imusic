@@ -20,7 +20,7 @@ describe('Catalogue Provider Adapters and Legal Declarations', () => {
     const handoff = new CommercialHandoffProvider();
     expect(handoff.capabilities.canPlayFullTracks).toBe(false);
     expect(handoff.capabilities.canDownloadCache).toBe(false);
-    expect(handoff.getTermsNotice()).toContain('protected by copyright');
+    expect(handoff.getTermsNotice()).toContain('Official provider handoff');
   });
 
   it('open licensed provider declares full playback capability and CC licensing', () => {

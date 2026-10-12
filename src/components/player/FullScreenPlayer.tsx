@@ -334,6 +334,7 @@ export const FullScreenPlayer: React.FC = () => {
                   step={0.01}
                   value={isMuted ? 0 : volume}
                   onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  onInput={(e) => setVolume(parseFloat((e.target as HTMLInputElement).value))}
                   className={styles.volumeSlider}
                   aria-label="Volume slider"
                 />
