@@ -16,6 +16,54 @@ export function decodeHtmlEntities(str: string): string {
     .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec));
 }
 
+export function normalizeSearchText(str: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .replace(/aa/g, 'a')
+    .replace(/ee/g, 'i')
+    .replace(/oo/g, 'u')
+    .replace(/zh/g, 'l')
+    .replace(/sh/g, 's')
+    .replace(/th/g, 't')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+export function getQueryVariants(q: string): string[] {
+  const trimmed = q.trim();
+  const variants = new Set<string>([trimmed]);
+  const lower = trimmed.toLowerCase();
+
+  // Known Indian regional transliteration differences
+  if (lower.includes('indrajalam')) {
+    variants.add(trimmed.replace(/indrajalam/gi, 'indrajaalam'));
+  }
+  if (lower.includes('indrajaalam')) {
+    variants.add(trimmed.replace(/indrajaalam/gi, 'indrajalam'));
+  }
+  if (lower.includes('avesham')) {
+    variants.add(trimmed.replace(/avesham/gi, 'aavesham'));
+  }
+  if (lower.includes('aavesham')) {
+    variants.add(trimmed.replace(/aavesham/gi, 'avesham'));
+  }
+  if (lower.includes('kudumba')) {
+    variants.add(trimmed.replace(/kudumba/gi, 'kudumbam'));
+  }
+  if (lower.includes('kudumbam')) {
+    variants.add(trimmed.replace(/kudumbam/gi, 'kudumba'));
+  }
+
+  // Broad double 'a' phonetic expansion (e.g., indrajalam <-> indrajaalam)
+  if (lower.includes('aa')) {
+    variants.add(trimmed.replace(/aa/gi, 'a'));
+  } else if (/a[b-z]a/i.test(trimmed)) {
+    variants.add(trimmed.replace(/a/i, 'aa'));
+  }
+
+  return Array.from(variants).slice(0, 3);
+}
+
 export function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null {
   if (!encryptedUrl) return null;
   try {
@@ -28,7 +76,7 @@ export function decryptMediaUrl(encryptedUrl: string | undefined | null): string
     if (!rawUrl || !rawUrl.startsWith('http')) return null;
 
     // Prefer high-fidelity 320kbps stream
-    return rawUrl.replace(/_96\.mp4$/, '_320.mp4');
+    return rawUrl.replace(/_96\.mp4/, '_320.mp4');
   } catch (err) {
     console.warn('Failed decrypting Saavn media URL:', err);
     return null;
@@ -60,112 +108,130 @@ export class IndianMusicProvider implements CatalogueProvider {
 
     try {
       const queriesToRun = q
-        ? [q]
+        ? getQueryVariants(q)
         : [
             'Bethlehem Kudumba Unit',
+            'Indrajaalam',
             'Latest Malayalam Hits',
             'Tamil Trending Hits',
             'Latest Hindi Hits',
             'The Weeknd Trending',
           ];
 
-      // Fetch songs and album results in parallel
+      const headers = {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'application/json, text/plain, */*',
+      };
+
+      // Fetch songs, albums, and autocomplete across query variants in parallel
       const searchPromises = queriesToRun.map(async (searchQuery) => {
         const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=18&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=10&q=${encodeURIComponent(
+        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=12&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const headers = {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'application/json, text/plain, */*',
-        };
+        const autoUrl = `${SAAVN_API_BASE}?__call=autocomplete.get&_format=json&_marker=0&cc=in&query=${encodeURIComponent(
+          searchQuery
+        )}`;
 
-        const [songRes, albumRes] = await Promise.all([
-          fetch(songUrl, { headers, next: { revalidate: 300 } }).catch(() => null),
-          fetch(albumUrl, { headers, next: { revalidate: 300 } }).catch(() => null),
+        const [songRes, albumRes, autoRes] = await Promise.all([
+          fetch(songUrl, { headers }).catch(() => null),
+          fetch(albumUrl, { headers }).catch(() => null),
+          fetch(autoUrl, { headers }).catch(() => null),
         ]);
 
         let rawSongs: any[] = [];
         let rawAlbums: any[] = [];
+        let autoJson: any = null;
 
         if (songRes && songRes.ok) {
-          const json = await songRes.json();
+          const json = await songRes.json().catch(() => ({}));
           rawSongs = json.results || [];
         }
 
         if (albumRes && albumRes.ok) {
-          const json = await albumRes.json();
+          const json = await albumRes.json().catch(() => ({}));
           rawAlbums = json.results || [];
         }
 
-        return { rawSongs, rawAlbums };
+        if (autoRes && autoRes.ok) {
+          autoJson = await autoRes.json().catch(() => null);
+        }
+
+        return { rawSongs, rawAlbums, autoJson };
       });
 
       const batchResults = await Promise.all(searchPromises);
       let rawResults = batchResults.flatMap((b) => b.rawSongs);
       let rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
 
-      // If specific search query provided, also query autocomplete.get for best official movie and song matches
-      if (q) {
+      // Process autocomplete results from all query variants
+      const topSongIdsToFetch = new Set<string>();
+      for (const b of batchResults) {
+        if (!b.autoJson) continue;
+
+        // Process topquery (highest confidence entity from JioSaavn)
+        const topQuery = (b.autoJson.topquery?.data || []) as any[];
+        for (const tq of topQuery) {
+          if (tq.type === 'song' && tq.id) {
+            topSongIdsToFetch.add(tq.id);
+          } else if (tq.type === 'album' && tq.id) {
+            rawAlbumResults.unshift({
+              albumid: tq.id,
+              title: tq.title,
+              image: tq.image,
+              music: tq.music || tq.description,
+              year: tq.more_info?.year || '2024',
+            });
+          }
+        }
+
+        // Process autocomplete albums
+        const autoAlbums = (b.autoJson.albums?.data || []) as any[];
+        if (autoAlbums.length > 0) {
+          const formattedAutoAlbums = autoAlbums.map((al) => ({
+            albumid: al.id,
+            title: al.title,
+            image: al.image,
+            music: al.music,
+            year: al.more_info?.year || '2024',
+          }));
+          rawAlbumResults = [...formattedAutoAlbums, ...rawAlbumResults];
+        }
+
+        // Collect autocomplete song IDs
+        const autoSongs = (b.autoJson.songs?.data || []) as any[];
+        for (const s of autoSongs) {
+          if (s.id) topSongIdsToFetch.add(s.id);
+        }
+      }
+
+      // Batch fetch full details for any top autocomplete song IDs not already fully populated
+      const existingSongIds = new Set(rawResults.map((s) => s.id));
+      const missingSongIds = Array.from(topSongIdsToFetch).filter(
+        (id) => !existingSongIds.has(id)
+      );
+
+      if (missingSongIds.length > 0) {
         try {
-          const autoUrl = `${SAAVN_API_BASE}?__call=autocomplete.get&_format=json&_marker=0&cc=in&query=${encodeURIComponent(
-            q
+          const pidsUrl = `${SAAVN_API_BASE}?__call=song.getDetails&_format=json&_marker=0&cc=in&pids=${encodeURIComponent(
+            missingSongIds.join(',')
           )}`;
-          const autoRes = await fetch(autoUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              Accept: 'application/json, text/plain, */*',
-            },
-            next: { revalidate: 300 },
-          });
+          const pidsRes = await fetch(pidsUrl, { headers })
+            .then((r) => r.json())
+            .catch(() => ({}));
 
-          if (autoRes.ok) {
-            const autoJson = await autoRes.json();
-            const autoAlbums = (autoJson.albums?.data || []) as any[];
-            const autoSongs = (autoJson.songs?.data || []) as any[];
-
-            // Prepend autocomplete albums to ensure exact movie soundtrack matches are top-ranked
-            if (autoAlbums.length > 0) {
-              const formattedAutoAlbums = autoAlbums.map((al) => ({
-                albumid: al.id,
-                title: al.title,
-                image: al.image,
-                music: al.music,
-                year: al.more_info?.year || '2024',
-              }));
-              rawAlbumResults = [...formattedAutoAlbums, ...rawAlbumResults];
-            }
-
-            // Check if top autocomplete songs need metadata fetching
-            const existingSongIds = new Set(rawResults.map((s) => s.id));
-            const missingSongIds = autoSongs
-              .map((s) => s.id)
-              .filter((id) => id && !existingSongIds.has(id));
-
-            if (missingSongIds.length > 0) {
-              const pidsUrl = `${SAAVN_API_BASE}?__call=song.getDetails&_format=json&_marker=0&cc=in&pids=${encodeURIComponent(
-                missingSongIds.join(',')
-              )}`;
-              const pidsRes = await fetch(pidsUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                next: { revalidate: 300 },
-              }).then((r) => r.json()).catch(() => ({}));
-
-              for (const id of missingSongIds) {
-                if (pidsRes[id]) {
-                  rawResults.unshift(pidsRes[id]);
-                }
-              }
+          for (const id of missingSongIds) {
+            if (pidsRes[id]) {
+              rawResults.unshift(pidsRes[id]);
             }
           }
-        } catch (e) {
-          console.warn('Autocomplete fetch error:', e);
+        } catch {
+          // Ignore
         }
       }
 
@@ -232,6 +298,35 @@ export class IndianMusicProvider implements CatalogueProvider {
         });
       }
 
+      // Score and rank tracks with Spotify-grade relevance
+      const normQ = normalizeSearchText(q);
+      if (normQ) {
+        const scoredTracks = tracks.map((track) => {
+          const normTitle = normalizeSearchText(track.title);
+          const normAlbum = normalizeSearchText(track.album?.title || '');
+          let score = 0;
+
+          if (normTitle === normQ) score += 120;
+          else if (normTitle.startsWith(normQ)) score += 70;
+          else if (normTitle.includes(normQ)) score += 40;
+
+          if (normAlbum === normQ) score += 50;
+          else if (normAlbum.startsWith(normQ)) score += 30;
+          else if (normAlbum.includes(normQ)) score += 15;
+
+          // Tiebreaker bonus for recent releases
+          if (track.album?.releaseYear) {
+            score += Math.max(0, (track.album.releaseYear - 1980) * 0.2);
+          }
+
+          return { track, score };
+        });
+
+        scoredTracks.sort((a, b) => b.score - a.score);
+        tracks.length = 0;
+        tracks.push(...scoredTracks.map((st) => st.track));
+      }
+
       // Process and deduplicate movie albums
       const seenAlbumIds = new Set<string>();
       const albums: AlbumSummary[] = [];
@@ -254,6 +349,24 @@ export class IndianMusicProvider implements CatalogueProvider {
           isLossless: true,
           isHiRes: false,
         });
+      }
+
+      // Score and rank albums with Spotify-grade relevance
+      if (normQ) {
+        const scoredAlbums = albums.map((album) => {
+          const normTitle = normalizeSearchText(album.title);
+          let score = 0;
+
+          if (normTitle === normQ) score += 120;
+          else if (normTitle.startsWith(normQ)) score += 70;
+          else if (normTitle.includes(normQ)) score += 40;
+
+          return { album, score };
+        });
+
+        scoredAlbums.sort((a, b) => b.score - a.score);
+        albums.length = 0;
+        albums.push(...scoredAlbums.map((sa) => sa.album));
       }
 
       const artists = tracks.flatMap((t) => t.artists);

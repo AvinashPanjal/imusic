@@ -8,6 +8,7 @@ import { TrackData, AlbumSummary, ArtistSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { usePlayerStore } from '@/store/playerStore';
+import { normalizeSearchText } from '@/lib/providers/IndianMusicProvider';
 import styles from './search.module.css';
 
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
@@ -20,6 +21,15 @@ const POPULAR_SOUNDTRACKS: AlbumSummary[] = [
     coverImage: 'https://c.saavncdn.com/569/Bethlehem-Kudumba-Unit-Malayalam-2026-20260901164324-500x500.jpg',
     releaseYear: 2026,
     genre: 'Malayalam / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-55472703',
+    title: 'Indrajaalam',
+    artistName: 'S. P. Venkatesh, Mohanlal',
+    coverImage: 'https://c.saavncdn.com/494/Indrajaalam-Malayalam-2024-20250403152648-500x500.jpg',
+    releaseYear: 1990,
+    genre: 'Malayalam / Classic Soundtrack',
     isLossless: true,
   },
   {
@@ -210,15 +220,30 @@ export default function SearchPage() {
     setDebouncedQuery(query.trim());
   };
 
-  // Top Result determination (Spotify style)
+  // Top Result determination (Spotify style with phonetic normalization)
   const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
   const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
+
+  const normQuery = normalizeSearchText(debouncedQuery);
+  const normAlbumTitle = topAlbum ? normalizeSearchText(topAlbum.title) : '';
+  const normTrackTitle = topTrack ? normalizeSearchText(topTrack.title) : '';
+
+  const isAlbumExact = Boolean(
+    normAlbumTitle && (normAlbumTitle === normQuery || normAlbumTitle.startsWith(normQuery))
+  );
+  const isTrackExact = Boolean(
+    normTrackTitle && (normTrackTitle === normQuery || normTrackTitle.startsWith(normQuery))
+  );
 
   // Decide whether top match is an album or track
   const isTopMatchAlbum = Boolean(
     topAlbum &&
-      (topAlbum.title.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-        debouncedQuery.toLowerCase().includes(topAlbum.title.toLowerCase()))
+      (isAlbumExact ||
+        (!isTrackExact &&
+          (normAlbumTitle.includes(normQuery) ||
+            normQuery.includes(normAlbumTitle) ||
+            topAlbum.title.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+            debouncedQuery.toLowerCase().includes(topAlbum.title.toLowerCase()))))
   );
 
   const handlePlayTopResult = async (e: React.MouseEvent) => {

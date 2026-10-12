@@ -34,34 +34,35 @@ export class PrivateLibraryProvider implements CatalogueProvider {
       };
     }
 
-    const [tracks, albums, artists] = await Promise.all([
-      prisma.track.findMany({
-        where: {
-          title: { contains: q },
-        },
-        include: {
-          album: true,
-          artists: { include: { artist: true } },
-          assets: true,
-        },
-        take: 20,
-      }),
-      prisma.album.findMany({
-        where: {
-          title: { contains: q },
-        },
-        include: {
-          artist: true,
-        },
-        take: 10,
-      }),
-      prisma.artist.findMany({
-        where: {
-          name: { contains: q },
-        },
-        take: 10,
-      }),
-    ]);
+    try {
+      const [tracks, albums, artists] = await Promise.all([
+        prisma.track.findMany({
+          where: {
+            title: { contains: q },
+          },
+          include: {
+            album: true,
+            artists: { include: { artist: true } },
+            assets: true,
+          },
+          take: 20,
+        }),
+        prisma.album.findMany({
+          where: {
+            title: { contains: q },
+          },
+          include: {
+            artist: true,
+          },
+          take: 10,
+        }),
+        prisma.artist.findMany({
+          where: {
+            name: { contains: q },
+          },
+          take: 10,
+        }),
+      ]);
 
     const formattedTracks: TrackData[] = tracks.map((t) => ({
       id: t.id,
@@ -104,25 +105,35 @@ export class PrivateLibraryProvider implements CatalogueProvider {
       providerCode: this.code,
     }));
 
-    return {
-      providerCode: this.code,
-      providerName: this.name,
-      tracks: formattedTracks,
-      albums: albums.map((al) => ({
-        id: al.id,
-        title: al.title,
-        coverImage: al.coverImage,
-        releaseYear: al.releaseYear,
-        artistName: al.artist.name,
-        isHiRes: al.isHiRes,
-        isLossless: al.isLossless,
-      })),
-      artists: artists.map((ar) => ({
-        id: ar.id,
-        name: ar.name,
-        image: ar.image,
-      })),
-    };
+      return {
+        providerCode: this.code,
+        providerName: this.name,
+        tracks: formattedTracks,
+        albums: albums.map((al) => ({
+          id: al.id,
+          title: al.title,
+          coverImage: al.coverImage,
+          releaseYear: al.releaseYear,
+          artistName: al.artist.name,
+          isHiRes: al.isHiRes,
+          isLossless: al.isLossless,
+        })),
+        artists: artists.map((ar) => ({
+          id: ar.id,
+          name: ar.name,
+          image: ar.image,
+        })),
+      };
+    } catch (err) {
+      console.warn('PrivateLibraryProvider search failed or DB uninitialized:', err);
+      return {
+        providerCode: this.code,
+        providerName: this.name,
+        tracks: [],
+        albums: [],
+        artists: [],
+      };
+    }
   }
 
   public async getTrack(id: string): Promise<TrackData | null> {

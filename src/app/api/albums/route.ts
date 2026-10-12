@@ -17,6 +17,18 @@ const FEATURED_SOUNDTRACKS = [
     artist: { id: 'saavn-artist-vishnu', name: 'Vishnu Vijay' },
   },
   {
+    id: 'saavn-album-55472703',
+    title: 'Indrajaalam',
+    artistName: 'S. P. Venkatesh, Mohanlal',
+    coverImage: 'https://c.saavncdn.com/494/Indrajaalam-Malayalam-2024-20250403152648-500x500.jpg',
+    releaseYear: 1990,
+    genre: 'Malayalam / Classic Soundtrack',
+    totalTracks: 5,
+    isHiRes: false,
+    isLossless: true,
+    artist: { id: 'saavn-artist-536175', name: 'S. P. Venkatesh' },
+  },
+  {
     id: 'saavn-album-49113982',
     title: 'Leo',
     artistName: 'Anirudh Ravichander',
