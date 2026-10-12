@@ -56,10 +56,15 @@ export const FullScreenPlayer: React.FC = () => {
     setActiveViewInPlayer,
   } = usePlayerStore();
 
+  const [mounted, setMounted] = useState(false);
   const [isFav, setIsFav] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Sync seek slider value
   useEffect(() => {
@@ -105,7 +110,7 @@ export const FullScreenPlayer: React.FC = () => {
     }
   }, [currentLyricIndex, activeViewInPlayer]);
 
-  if (!isFullScreenPlayerOpen || !currentTrack) {
+  if (!mounted || !isFullScreenPlayerOpen || !currentTrack) {
     return null;
   }
 

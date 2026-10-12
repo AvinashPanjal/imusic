@@ -34,24 +34,37 @@ const savePersistedState = (state: PersistedState) => {
 };
 
 export const usePlayerStore = create<PlaybackState>((set, get) => {
-  const initial = loadPersistedState();
-
   return {
-    currentTrack: initial.currentTrack || null,
-    queue: initial.queue || [],
-    queueIndex: initial.queueIndex ?? -1,
+    currentTrack: null,
+    queue: [],
+    queueIndex: -1,
     isPlaying: false,
     isLoading: false,
     currentTime: 0,
     duration: 0,
-    volume: initial.volume ?? 1,
+    volume: 1,
     isMuted: false,
-    shuffle: initial.shuffle ?? false,
-    repeatMode: initial.repeatMode ?? 'off',
+    shuffle: false,
+    repeatMode: 'off',
     isFullScreenPlayerOpen: false,
     activeViewInPlayer: 'now-playing',
     error: null,
     networkInterrupted: false,
+    isHydrated: false,
+
+    hydrate: () => {
+      if (typeof window === 'undefined' || get().isHydrated) return;
+      const persisted = loadPersistedState();
+      set({
+        currentTrack: persisted.currentTrack || null,
+        queue: persisted.queue || [],
+        queueIndex: persisted.queueIndex ?? -1,
+        volume: persisted.volume ?? 1,
+        repeatMode: persisted.repeatMode ?? 'off',
+        shuffle: persisted.shuffle ?? false,
+        isHydrated: true,
+      });
+    },
 
     playTrack: (track: TrackData, newQueue?: TrackData[], index?: number) => {
       let updatedQueue = newQueue ? [...newQueue] : get().queue;

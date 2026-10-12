@@ -96,6 +96,8 @@ export interface PlaybackState {
   activeViewInPlayer: 'now-playing' | 'lyrics' | 'queue';
   error: string | null;
   networkInterrupted: boolean;
+  isHydrated: boolean;
+  hydrate: () => void;
   // Actions
   playTrack: (track: TrackData, newQueue?: TrackData[], index?: number) => void;
   togglePlay: () => void;

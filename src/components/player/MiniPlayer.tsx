@@ -1,12 +1,13 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { usePlayerStore } from '@/store/playerStore';
 import { Play, Pause, SkipForward } from 'lucide-react';
 import styles from './MiniPlayer.module.css';
 
 export const MiniPlayer: React.FC = () => {
+  const [mounted, setMounted] = useState(false);
   const {
     currentTrack,
     isPlaying,
@@ -17,7 +18,11 @@ export const MiniPlayer: React.FC = () => {
     openFullScreenPlayer,
   } = usePlayerStore();
 
-  if (!currentTrack) {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || !currentTrack) {
     return null;
   }
 

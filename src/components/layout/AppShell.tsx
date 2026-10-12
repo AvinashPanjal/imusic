@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { usePlayerStore } from '@/store/playerStore';
 import { AudioEngine } from '@/components/player/AudioEngine';
 import { MiniPlayer } from '@/components/player/MiniPlayer';
 import { FullScreenPlayer } from '@/components/player/FullScreenPlayer';
@@ -9,6 +10,11 @@ import { DesktopSidebar } from '@/components/navigation/DesktopSidebar';
 import styles from './AppShell.module.css';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const hydrate = usePlayerStore((s) => s.hydrate);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
   return (
     <div className={styles.shell}>
       {/* Persistent Audio Engine */}
