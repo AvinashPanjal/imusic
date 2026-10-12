@@ -61,15 +61,21 @@ export class IndianMusicProvider implements CatalogueProvider {
     try {
       const queriesToRun = q
         ? [q]
-        : ['Tamil Trending 2024', 'Malayalam Trending 2024', 'Hindi Trending 2024', 'The Weeknd Trending'];
+        : [
+            'Bethlehem Kudumba Unit',
+            'Latest Malayalam Hits',
+            'Tamil Trending Hits',
+            'Latest Hindi Hits',
+            'The Weeknd Trending',
+          ];
 
       // Fetch songs and album results in parallel
       const searchPromises = queriesToRun.map(async (searchQuery) => {
-        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=12&q=${encodeURIComponent(
+        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=18&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=6&q=${encodeURIComponent(
+        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=10&q=${encodeURIComponent(
           searchQuery
         )}`;
 

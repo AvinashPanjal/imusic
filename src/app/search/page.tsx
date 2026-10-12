@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Search as SearchIcon, X, History, Sparkles, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search as SearchIcon, X, History, Film, Music2, User, AlertCircle } from 'lucide-react';
 import { TrackData, AlbumSummary, ArtistSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
@@ -13,6 +13,7 @@ export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'all' | 'movies' | 'songs' | 'artists'>('all');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<{
     tracks: TrackData[];
@@ -68,9 +69,25 @@ export default function SearchPage() {
             }
           }
 
+          // Deduplicate albums by ID
+          const seenAlbumIds = new Set<string>();
+          const uniqueAlbums = aggregatedAlbums.filter((a) => {
+            if (seenAlbumIds.has(a.id)) return false;
+            seenAlbumIds.add(a.id);
+            return true;
+          });
+
+          // Deduplicate tracks by ID
+          const seenTrackIds = new Set<string>();
+          const uniqueTracks = aggregatedTracks.filter((t) => {
+            if (seenTrackIds.has(t.id)) return false;
+            seenTrackIds.add(t.id);
+            return true;
+          });
+
           setResults({
-            tracks: aggregatedTracks,
-            albums: aggregatedAlbums,
+            tracks: uniqueTracks,
+            albums: uniqueAlbums,
             artists: aggregatedArtists,
           });
 
@@ -120,7 +137,7 @@ export default function SearchPage() {
           <SearchIcon size={20} className={styles.searchIcon} />
           <input
             type="search"
-            placeholder="Tracks, artists, albums..."
+            placeholder="Search movies, songs, artists..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className={styles.input}
@@ -140,13 +157,53 @@ export default function SearchPage() {
             </button>
           )}
         </div>
+
+        {/* Category Tabs for Fast Filter */}
+        {hasResults && (
+          <div className={styles.filterRow}>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${activeTab === 'all' ? styles.filterPillActive : ''}`}
+              onClick={() => setActiveTab('all')}
+            >
+              All Results
+            </button>
+            {results.albums.length > 0 && (
+              <button
+                type="button"
+                className={`${styles.filterPill} ${activeTab === 'movies' ? styles.filterPillActive : ''}`}
+                onClick={() => setActiveTab('movies')}
+              >
+                Movie Soundtracks & Playlists ({results.albums.length})
+              </button>
+            )}
+            {results.tracks.length > 0 && (
+              <button
+                type="button"
+                className={`${styles.filterPill} ${activeTab === 'songs' ? styles.filterPillActive : ''}`}
+                onClick={() => setActiveTab('songs')}
+              >
+                Songs ({results.tracks.length})
+              </button>
+            )}
+            {results.artists.length > 0 && (
+              <button
+                type="button"
+                className={`${styles.filterPill} ${activeTab === 'artists' ? styles.filterPillActive : ''}`}
+                onClick={() => setActiveTab('artists')}
+              >
+                Artists ({results.artists.length})
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Loading state */}
       {loading && (
         <div className={styles.loadingState}>
           <div className={styles.spinner} />
-          <span>Searching across all legal vaults...</span>
+          <span>Searching 50M+ tracks and movie soundtracks...</span>
         </div>
       )}
 
@@ -187,18 +244,47 @@ export default function SearchPage() {
           <AlertCircle size={40} className={styles.noResultsIcon} />
           <h2>No matching audio found</h2>
           <p>
-            No results for &ldquo;{debouncedQuery}&rdquo; in private library or authorized open catalogues.
+            No results for &ldquo;{debouncedQuery}&rdquo;. Try searching for movie names like &ldquo;Bethlehem Kudumba Unit&rdquo;, &ldquo;Leo&rdquo;, or &ldquo;Aavesham&rdquo;.
           </p>
         </div>
       )}
 
-      {/* Results */}
+      {/* Results View */}
       {!loading && hasResults && (
         <div className={styles.resultsContainer}>
-          {/* Tracks */}
-          {results.tracks.length > 0 && (
+          {/* 1. MOVIE SOUNDTRACKS & PLAYLISTS (FEATURED FIRST) */}
+          {(activeTab === 'all' || activeTab === 'movies') && results.albums.length > 0 && (
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Songs ({results.tracks.length})</h2>
+              <div className={styles.sectionTitleRow}>
+                <Film size={20} className={styles.sectionIcon} />
+                <h2 className={styles.sectionTitle}>
+                  Movie Soundtracks & Playlists ({results.albums.length})
+                </h2>
+              </div>
+
+              {activeTab === 'all' ? (
+                <div className={styles.albumsGrid}>
+                  {results.albums.map((album) => (
+                    <AlbumCard key={album.id} album={album} />
+                  ))}
+                </div>
+              ) : (
+                <div className={styles.albumsFullGrid}>
+                  {results.albums.map((album) => (
+                    <AlbumCard key={album.id} album={album} />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* 2. SONGS */}
+          {(activeTab === 'all' || activeTab === 'songs') && results.tracks.length > 0 && (
+            <section className={styles.section}>
+              <div className={styles.sectionTitleRow}>
+                <Music2 size={20} className={styles.sectionIcon} />
+                <h2 className={styles.sectionTitle}>Songs ({results.tracks.length})</h2>
+              </div>
               <div className={styles.trackList}>
                 {results.tracks.map((track, idx) => (
                   <TrackListItem
@@ -212,22 +298,13 @@ export default function SearchPage() {
             </section>
           )}
 
-          {/* Albums */}
-          {results.albums.length > 0 && (
+          {/* 3. ARTISTS */}
+          {(activeTab === 'all' || activeTab === 'artists') && results.artists.length > 0 && (
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Albums ({results.albums.length})</h2>
-              <div className={styles.albumsGrid}>
-                {results.albums.map((album) => (
-                  <AlbumCard key={album.id} album={album} />
-                ))}
+              <div className={styles.sectionTitleRow}>
+                <User size={20} className={styles.sectionIcon} />
+                <h2 className={styles.sectionTitle}>Artists ({results.artists.length})</h2>
               </div>
-            </section>
-          )}
-
-          {/* Artists */}
-          {results.artists.length > 0 && (
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Artists ({results.artists.length})</h2>
               <div className={styles.artistsGrid}>
                 {results.artists.map((artist) => (
                   <div key={artist.id} className={styles.artistPill}>

@@ -64,7 +64,16 @@ export const AudioEngine: React.FC = () => {
     }
 
     try {
-      const artworkUrl = track.album?.coverImage || '/icons/icon-512x512.png';
+      const rawArt = track.album?.coverImage || '/icons/default-artwork.png';
+      const toAbsoluteUrl = (url: string) => {
+        if (!url) return '';
+        if (url.startsWith('http://') || url.startsWith('https://')) return url;
+        if (typeof window !== 'undefined') {
+          return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+        }
+        return url;
+      };
+      const artworkUrl = toAbsoluteUrl(rawArt);
       const artistNames = track.artists?.map((a) => a.name).join(', ') || 'Unknown Artist';
 
       navigator.mediaSession.metadata = new window.MediaMetadata({
@@ -291,9 +300,12 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handlePause = () => {
-      setIsPlaying(false);
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
+      // CRITICAL FOR IOS: Do NOT mark isPlaying as false if the pause was an iOS background handoff!
+      // Only reflect pause if the user explicitly commanded pause from the app or MediaSession
+      if (!usePlayerStore.getState().isPlaying) {
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'paused';
+        }
       }
     };
 
@@ -355,8 +367,11 @@ export const AudioEngine: React.FC = () => {
 
     // Ensure audio stays in sync when returning from background
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && isPlaying && audio.paused) {
-        audio.play().catch(() => {});
+      if (document.visibilityState === 'visible') {
+        const state = usePlayerStore.getState();
+        if (state.isPlaying && audioRef.current && audioRef.current.paused) {
+          audioRef.current.play().catch(() => {});
+        }
       }
     };
 

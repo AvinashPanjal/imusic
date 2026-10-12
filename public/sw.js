@@ -1,4 +1,4 @@
-const CACHE_NAME = 'imusic-shell-v1';
+const CACHE_NAME = 'imusic-shell-v8';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -9,6 +9,7 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
@@ -16,7 +17,6 @@ self.addEventListener('install', (event) => {
       });
     })
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -25,6 +25,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME && !key.startsWith('imusic-offline-audio-')) {
+            console.log('Clearing old service worker cache:', key);
             return caches.delete(key);
           }
         })
@@ -37,8 +38,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache Range requests or dynamic streaming in general service worker
-  // (Offline downloaded tracks are stored independently via IndexedDB)
+  // Never intercept Range requests or streaming APIs
   if (
     url.pathname.startsWith('/api/stream') ||
     url.pathname.startsWith('/api/playback') ||
@@ -47,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Handle navigation requests
+  // Handle navigation requests: network first with cache fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(async () => {
@@ -59,7 +59,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first with network fallback
+  // Static assets: Network-first to ensure new code takes effect immediately
   if (
     url.pathname.startsWith('/_next/static') ||
     url.pathname.startsWith('/icons') ||
@@ -68,16 +68,16 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('.svg')
   ) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((response) => {
+      fetch(event.request)
+        .then((response) => {
           if (response.status === 200) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
           }
           return response;
-        });
-      })
+        })
+        .catch(() => caches.match(event.request))
     );
+    return;
   }
 });

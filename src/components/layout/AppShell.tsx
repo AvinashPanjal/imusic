@@ -14,6 +14,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
   useEffect(() => {
     hydrate();
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.update().catch(() => {});
+      });
+    }
   }, [hydrate]);
   return (
     <div className={styles.shell}>

@@ -64,6 +64,44 @@
   color: var(--text-primary);
 }
 
+.filterRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+
+.filterRow::-webkit-scrollbar {
+  display: none;
+}
+
+.filterPill {
+  min-width: auto;
+  min-height: 32px;
+  padding: 4px 14px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.filterPill:hover {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+}
+
+.filterPillActive {
+  background: var(--accent-subtle);
+  border-color: var(--border-focus);
+  color: var(--accent-hover);
+}
+
 .loadingState {
   display: flex;
   align-items: center;
@@ -173,6 +211,16 @@
   gap: 12px;
 }
 
+.sectionTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionIcon {
+  color: var(--accent-hover);
+}
+
 .sectionTitle {
   font-size: 18px;
   font-weight: 700;
@@ -190,6 +238,17 @@
   gap: 14px;
   overflow-x: auto;
   padding-bottom: 6px;
+  scrollbar-width: none;
+}
+
+.albumsGrid::-webkit-scrollbar {
+  display: none;
+}
+
+.albumsFullGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
 }
 
 .artistsGrid {

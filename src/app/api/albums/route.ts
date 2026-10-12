@@ -5,6 +5,18 @@ export const dynamic = 'force-dynamic';
 
 const FEATURED_SOUNDTRACKS = [
   {
+    id: 'saavn-album-79759837',
+    title: 'Bethlehem Kudumba Unit',
+    artistName: 'Vishnu Vijay',
+    coverImage: 'https://c.saavncdn.com/569/Bethlehem-Kudumba-Unit-Malayalam-2026-20260901164324-500x500.jpg',
+    releaseYear: 2026,
+    genre: 'Malayalam / Soundtrack',
+    totalTracks: 10,
+    isHiRes: false,
+    isLossless: true,
+    artist: { id: 'saavn-artist-vishnu', name: 'Vishnu Vijay' },
+  },
+  {
     id: 'saavn-album-49113982',
     title: 'Leo',
     artistName: 'Anirudh Ravichander',
