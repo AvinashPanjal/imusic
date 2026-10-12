@@ -16,6 +16,8 @@ export default function HomePage() {
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
   const [openTracks, setOpenTracks] = useState<TrackData[]>([]);
   const [onlineTrending, setOnlineTrending] = useState<TrackData[]>([]);
+  const [indianTracks, setIndianTracks] = useState<TrackData[]>([]);
+  const [selectedLanguage, setSelectedLanguage] = useState<'all' | 'tamil' | 'malayalam' | 'hindi'>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,6 +56,12 @@ export default function HomePage() {
 
         if (searchRes.ok) {
           const data = await searchRes.json();
+          // Extract Indian mainstream music
+          const indianProvider = data.results?.find((r: any) => r.providerCode === 'indian_music_vault');
+          if (indianProvider) {
+            setIndianTracks(indianProvider.tracks || []);
+          }
+
           // Extract open-licensed and online trending catalogue items
           const openProvider = data.results?.find((r: any) => r.providerCode === 'open_licensed');
           if (openProvider) {
@@ -75,7 +83,17 @@ export default function HomePage() {
     loadHomeData();
   }, []);
 
-  const hasAnyContent = recentTracks.length > 0 || openTracks.length > 0 || onlineTrending.length > 0;
+  const hasAnyContent =
+    recentTracks.length > 0 ||
+    openTracks.length > 0 ||
+    onlineTrending.length > 0 ||
+    indianTracks.length > 0;
+
+  const filteredIndianTracks = indianTracks.filter((t) => {
+    if (selectedLanguage === 'all') return true;
+    const g = (t.genre || '').toLowerCase();
+    return g.includes(selectedLanguage);
+  });
 
   return (
     <div className={styles.container}>
@@ -100,12 +118,74 @@ export default function HomePage() {
             <Sparkles size={12} />
             <span>Audiophile Grade</span>
           </div>
-          <h2 className={styles.bannerTitle}>Pure Lossless & Hi-Res Output</h2>
+          <h2 className={styles.bannerTitle}>Ad-Free Stream Engine</h2>
           <p className={styles.bannerText}>
-            Up to 24-bit/96kHz FLAC direct HTTP 206 range streaming. Connect an external DAC for bit-perfect clarity.
+            Stream direct 320kbps Tamil, Malayalam, Hindi, and Global tracks without ads. Full Lock Screen controls on iPhone.
           </p>
         </div>
       </section>
+
+      {/* Mainstream Indian Hits Section (Tamil, Malayalam, Hindi) */}
+      {indianTracks.length > 0 && (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <h2 className={styles.sectionTitle}>Latest Indian Hits</h2>
+                <span className={styles.sectionBadge}>320 KBPS AAC</span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Top trending Tamil, Malayalam & Bollywood releases
+              </span>
+            </div>
+          </div>
+
+          {/* Language filter pills */}
+          <div className={styles.horizontalScroll}>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${selectedLanguage === 'all' ? styles.filterPillActive : ''}`}
+              onClick={() => setSelectedLanguage('all')}
+            >
+              All Languages
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${selectedLanguage === 'tamil' ? styles.filterPillActive : ''}`}
+              onClick={() => setSelectedLanguage('tamil')}
+            >
+              Tamil (தமிழ்)
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${selectedLanguage === 'malayalam' ? styles.filterPillActive : ''}`}
+              onClick={() => setSelectedLanguage('malayalam')}
+            >
+              Malayalam (മലയാളം)
+            </button>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${selectedLanguage === 'hindi' ? styles.filterPillActive : ''}`}
+              onClick={() => setSelectedLanguage('hindi')}
+            >
+              Hindi (हिन्दी)
+            </button>
+          </div>
+
+          <div className={styles.trackList}>
+            {(filteredIndianTracks.length > 0 ? filteredIndianTracks : indianTracks)
+              .slice(0, 10)
+              .map((track, idx) => (
+                <TrackListItem
+                  key={track.id}
+                  track={track}
+                  index={idx}
+                  playlistContext={filteredIndianTracks.length > 0 ? filteredIndianTracks : indianTracks}
+                />
+              ))}
+          </div>
+        </section>
+      )}
 
       {/* Empty State if completely blank */}
       {!loading && !hasAnyContent && (

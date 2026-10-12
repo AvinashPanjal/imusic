@@ -1,14 +1,16 @@
 import { CatalogueProvider, ProviderSearchResult } from './types';
 import { PrivateLibraryProvider } from './PrivateLibraryProvider';
+import { IndianMusicProvider } from './IndianMusicProvider';
+import { AudiusProvider } from './AudiusProvider';
 import { OpenLicensedProvider } from './OpenLicensedProvider';
 import { CommercialHandoffProvider } from './CommercialHandoffProvider';
-import { AudiusProvider } from './AudiusProvider';
 
 class ProviderRegistryClass {
   private providers: Map<string, CatalogueProvider> = new Map();
 
   constructor() {
     this.register(new PrivateLibraryProvider());
+    this.register(new IndianMusicProvider());
     this.register(new AudiusProvider());
     this.register(new OpenLicensedProvider());
     this.register(new CommercialHandoffProvider());
