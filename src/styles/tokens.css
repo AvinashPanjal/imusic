@@ -1,0 +1,73 @@
+:root {
+  /* Surface & Background */
+  --bg-base: #09090b;
+  --bg-surface-1: #131317;
+  --bg-surface-2: #1b1b22;
+  --bg-surface-3: #24242e;
+  --bg-surface-4: #2e2e3a;
+  --bg-surface-elevated: rgba(27, 27, 34, 0.85);
+  --bg-overlay: rgba(0, 0, 0, 0.75);
+
+  /* Brand / Electric Violet Accent */
+  --accent-primary: #7c3aed;
+  --accent-hover: #8b5cf6;
+  --accent-active: #6d28d9;
+  --accent-subtle: rgba(124, 58, 237, 0.15);
+  --accent-glow: rgba(124, 58, 237, 0.35);
+
+  /* Audio Quality Badges */
+  --badge-hires-bg: rgba(245, 158, 11, 0.16);
+  --badge-hires-text: #fbbf24;
+  --badge-hires-border: rgba(245, 158, 11, 0.35);
+  --badge-lossless-bg: rgba(59, 130, 246, 0.16);
+  --badge-lossless-text: #60a5fa;
+  --badge-lossless-border: rgba(59, 130, 246, 0.35);
+
+  /* Typography Colors */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-muted: #475569;
+  --text-accent: #a78bfa;
+
+  /* Borders & Dividers */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --border-focus: rgba(139, 92, 246, 0.6);
+
+  /* Status */
+  --status-error: #ef4444;
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+
+  /* Sizing and Dimensions */
+  --bottom-nav-height: 56px;
+  --mini-player-height: 64px;
+  --touch-target-min: 44px;
+  --header-height: 54px;
+
+  /* Border Radii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.65);
+  --shadow-player: 0 -4px 20px rgba(0, 0, 0, 0.7);
+
+  /* Safe Area Insets for iPhone */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 350ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}

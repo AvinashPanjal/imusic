@@ -1,0 +1,237 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  passwordHash String?
+  role         String        @default("user") // "admin" | "user"
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  playlists    Playlist[]
+  favorites    Favorite[]
+  playHistory  PlayHistory[]
+  settings     UserSettings?
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streamingQuality         String   @default("auto") // "auto" | "standard" | "high" | "lossless" | "hires"
+  wifiStreamingQuality     String   @default("hires")
+  cellularStreamingQuality String   @default("high")
+  downloadQuality          String   @default("lossless")
+  theme                    String   @default("dark")
+  autoCacheFavorites       Boolean  @default(false)
+  offlineMode              Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+model Artist {
+  id          String        @id @default(cuid())
+  name        String
+  bio         String?
+  image       String?
+  heroImage   String?
+  verified    Boolean       @default(false)
+  externalIds String?       // JSON serialized external IDs (e.g. { "musicbrainz": "..." })
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  albums      Album[]
+  tracks      TrackArtist[]
+
+  @@map("artists")
+}
+
+model Album {
+  id          String   @id @default(cuid())
+  title       String
+  artistId    String
+  artist      Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  coverImage  String?
+  releaseYear Int?
+  genre       String?
+  totalTracks Int      @default(0)
+  recordLabel String?
+  isHiRes     Boolean  @default(false)
+  isLossless  Boolean  @default(true)
+  externalIds String?  // JSON serialized external IDs
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tracks      Track[]
+
+  @@map("albums")
+}
+
+model Track {
+  id            String                 @id @default(cuid())
+  title         String
+  albumId       String?
+  album         Album?                 @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  duration      Float                  // Duration in seconds
+  trackNumber   Int?
+  discNumber    Int                    @default(1)
+  isrc          String?
+  genre         String?
+  explicit      Boolean                @default(false)
+  lyricsSynced  String?                // Timed LRC lines or JSON
+  lyricsPlain   String?                // Plain text lyrics
+  hasLyrics     Boolean                @default(false)
+  playCount     Int                    @default(0)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  artists       TrackArtist[]
+  assets        AudioAsset[]
+  playlists     PlaylistTrack[]
+  favorites     Favorite[]
+  playHistory   PlayHistory[]
+  providerLinks ProviderTrackMapping[]
+
+  @@map("tracks")
+}
+
+model TrackArtist {
+  id       String @id @default(cuid())
+  trackId  String
+  artistId String
+  role     String @default("primary") // "primary" | "featured" | "remixer"
+
+  track    Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([trackId, artistId])
+  @@map("track_artists")
+}
+
+model AudioAsset {
+  id          String   @id @default(cuid())
+  trackId     String
+  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  format      String   // "flac" | "alac" | "aac" | "mp3" | "wav"
+  codec       String   // "FLAC" | "AAC" | "MP3"
+  bitDepth    Int?     // 16, 24
+  sampleRate  Int?     // 44100, 48000, 96000, 192000
+  bitrate     Int?     // In kbps (e.g. 1411, 320, 256)
+  fileSize    BigInt?  // In bytes
+  isLossless  Boolean  @default(false)
+  isHiRes     Boolean  @default(false)
+  storageType String   @default("local") // "local" | "s3" | "remote_stream"
+  storageKey  String   // File path or S3 key or remote URL
+  duration    Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("audio_assets")
+}
+
+model Playlist {
+  id          String          @id @default(cuid())
+  title       String
+  description String?
+  coverImage  String?
+  isPublic    Boolean         @default(false)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tracks      PlaylistTrack[]
+
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  id         String   @id @default(cuid())
+  playlistId String
+  trackId    String
+  position   Int
+  addedAt    DateTime @default(now())
+
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, position])
+  @@map("playlist_tracks")
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  trackId   String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trackId])
+  @@map("favorites")
+}
+
+model PlayHistory {
+  id             String   @id @default(cuid())
+  userId         String
+  trackId        String
+  playedAt       DateTime @default(now())
+  durationPlayed Float?
+  completed      Boolean  @default(false)
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track          Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@map("play_history")
+}
+
+model MusicProvider {
+  id                   String                 @id @default(cuid())
+  code                 String                 @unique // "private_library" | "jamendo" | "free_music_archive" | "apple_music_handoff" | "spotify_handoff"
+  name                 String
+  description          String
+  isEnabled            Boolean                @default(true)
+  supportsFullPlayback Boolean                @default(false)
+  supportsPreviews     Boolean                @default(false)
+  supportsSearch       Boolean                @default(true)
+  supportsLyrics       Boolean                @default(false)
+  supportsDownloads    Boolean                @default(false)
+  supportsHiRes        Boolean                @default(false)
+  termsNotice          String?
+  config               String?                // JSON serialized configuration
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  trackMappings        ProviderTrackMapping[]
+
+  @@map("music_providers")
+}
+
+model ProviderTrackMapping {
+  id              String        @id @default(cuid())
+  trackId         String
+  providerId      String
+  externalTrackId String
+  externalUrl     String?       // Official external handoff URL (e.g. https://music.apple.com/...)
+  previewUrl      String?       // 30s preview URL if permitted
+  isPlayable      Boolean       @default(false)
+
+  track           Track         @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  provider        MusicProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, externalTrackId])
+  @@map("provider_track_mappings")
+}
