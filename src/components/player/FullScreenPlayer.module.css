@@ -300,6 +300,15 @@
   flex: 1;
 }
 
+.iosVolumeNotice {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: center;
+  margin-top: 4px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 /* Lyrics View */
 .lyricsView {
   flex: 1;

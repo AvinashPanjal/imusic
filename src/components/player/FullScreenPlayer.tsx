@@ -62,6 +62,14 @@ export const FullScreenPlayer: React.FC = () => {
   const [seekValue, setSeekValue] = useState(0);
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
 
+  const isIOS = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
+    );
+  }, []);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -339,6 +347,11 @@ export const FullScreenPlayer: React.FC = () => {
                   aria-label="Volume slider"
                 />
               </div>
+              {isIOS && (
+                <div className={styles.iosVolumeNotice}>
+                  Hardware volume buttons active
+                </div>
+              )}
             </div>
           )}
 

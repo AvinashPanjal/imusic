@@ -5,9 +5,6 @@ import { usePlayerStore } from '@/store/playerStore';
 
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const isGraphConnectedRef = useRef<boolean>(false);
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
 
@@ -28,38 +25,6 @@ export const AudioEngine: React.FC = () => {
     setNetworkInterrupted,
     updatePlaybackProgress,
   } = usePlayerStore();
-
-  // Initialize Web Audio API GainNode for iOS Safari volume control
-  const setupAudioGraph = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || isGraphConnectedRef.current) return;
-
-    try {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtxClass) return;
-
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new AudioCtxClass();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-
-      const source = ctx.createMediaElementSource(audio);
-      const gainNode = ctx.createGain();
-      const targetVol = isMuted ? 0 : volume;
-      gainNode.gain.setValueAtTime(targetVol, ctx.currentTime);
-
-      source.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      gainNodeRef.current = gainNode;
-      isGraphConnectedRef.current = true;
-    } catch (err) {
-      console.warn('Web Audio gain graph init deferred or failed:', err);
-    }
-  }, [isMuted, volume]);
 
   // Helper to resolve playable URL
   const resolveTrackUrl = useCallback(async (track: typeof currentTrack): Promise<string | null> => {
@@ -92,7 +57,7 @@ export const AudioEngine: React.FC = () => {
     return null;
   }, []);
 
-  // Update Media Session API
+  // Update Media Session API for iOS Lock Screen & Dynamic Island
   const updateMediaSession = useCallback((track: typeof currentTrack) => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !track) {
       return;
@@ -184,7 +149,6 @@ export const AudioEngine: React.FC = () => {
     if (!audio || !currentTrack) return;
 
     if (lastTrackIdRef.current === currentTrack.id) {
-      // Same track, do not re-fetch URL
       return;
     }
 
@@ -192,6 +156,28 @@ export const AudioEngine: React.FC = () => {
     retryCountRef.current = 0;
     setIsLoading(true);
     setError(null);
+
+    // Fast path: if streamUrl is already known, load synchronously for instant background transitions
+    if (currentTrack.streamUrl) {
+      audio.src = currentTrack.streamUrl;
+      audio.load();
+      updateMediaSession(currentTrack);
+
+      if (isPlaying) {
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (err.name === 'NotAllowedError') {
+              console.warn('Playback blocked by browser autoplay policy');
+              setIsPlaying(false);
+            } else {
+              console.warn('Audio play error:', err);
+            }
+          });
+        }
+      }
+      return;
+    }
 
     let active = true;
 
@@ -209,11 +195,9 @@ export const AudioEngine: React.FC = () => {
       updateMediaSession(currentTrack);
 
       if (isPlaying) {
-        setupAudioGraph();
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
-            // Check for iOS Autoplay policy rejection
             if (err.name === 'NotAllowedError') {
               console.warn('Playback blocked by browser autoplay policy');
               setIsPlaying(false);
@@ -228,7 +212,7 @@ export const AudioEngine: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentTrack, isPlaying, resolveTrackUrl, updateMediaSession, setError, setIsLoading, setIsPlaying, setupAudioGraph]);
+  }, [currentTrack, isPlaying, resolveTrackUrl, updateMediaSession, setError, setIsLoading, setIsPlaying]);
 
   // Handle play / pause toggle
   useEffect(() => {
@@ -236,11 +220,6 @@ export const AudioEngine: React.FC = () => {
     if (!audio || !audio.src) return;
 
     if (isPlaying) {
-      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-        audioCtxRef.current.resume().catch(() => {});
-      }
-      setupAudioGraph();
-
       if (audio.paused) {
         const playPromise = audio.play();
         if (playPromise !== undefined) {
@@ -262,7 +241,7 @@ export const AudioEngine: React.FC = () => {
         navigator.mediaSession.playbackState = 'paused';
       }
     }
-  }, [isPlaying, setIsPlaying, setupAudioGraph]);
+  }, [isPlaying, setIsPlaying]);
 
   // Handle seek synchronization
   useEffect(() => {
@@ -275,24 +254,17 @@ export const AudioEngine: React.FC = () => {
     }
   }, [currentTime, updateMediaSessionPosition]);
 
-  // Handle volume / mute with both standard audio element and Web Audio API GainNode for iOS
+  // Handle volume / mute
   useEffect(() => {
-    const targetVolume = isMuted ? 0 : volume;
     const audio = audioRef.current;
-    if (audio) {
-      try {
-        audio.volume = targetVolume;
-        audio.muted = isMuted;
-      } catch {}
-    }
-    if (gainNodeRef.current && audioCtxRef.current) {
-      try {
-        gainNodeRef.current.gain.setValueAtTime(targetVolume, audioCtxRef.current.currentTime);
-      } catch {}
-    }
+    if (!audio) return;
+    try {
+      audio.volume = isMuted ? 0 : volume;
+      audio.muted = isMuted;
+    } catch {}
   }, [volume, isMuted]);
 
-  // Setup audio event listeners
+  // Setup audio event listeners and visibility recovery
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -381,8 +353,16 @@ export const AudioEngine: React.FC = () => {
       setNetworkInterrupted(true);
     };
 
+    // Ensure audio stays in sync when returning from background
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isPlaying && audio.paused) {
+        audio.play().catch(() => {});
+      }
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -395,6 +375,7 @@ export const AudioEngine: React.FC = () => {
       audio.removeEventListener('error', handleError);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [
     updatePlaybackProgress,
@@ -413,9 +394,16 @@ export const AudioEngine: React.FC = () => {
     <audio
       ref={audioRef}
       playsInline
-      crossOrigin="anonymous"
-      preload="metadata"
-      style={{ display: 'none' }}
+      preload="auto"
+      style={{
+        position: 'fixed',
+        top: '-9999px',
+        left: '-9999px',
+        width: '1px',
+        height: '1px',
+        opacity: 0.001,
+        pointerEvents: 'none',
+      }}
       aria-hidden="true"
     />
   );
