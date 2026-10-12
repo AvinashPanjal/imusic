@@ -10,6 +10,7 @@ describe('Catalogue Provider Adapters and Legal Declarations', () => {
 
     const codes = providers.map((p) => p.code);
     expect(codes).toContain('private_library');
+    expect(codes).toContain('audius_online');
     expect(codes).toContain('open_licensed');
     expect(codes).toContain('commercial_handoff');
   });

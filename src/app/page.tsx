@@ -15,6 +15,7 @@ export default function HomePage() {
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
   const [openTracks, setOpenTracks] = useState<TrackData[]>([]);
+  const [onlineTrending, setOnlineTrending] = useState<TrackData[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -53,10 +54,15 @@ export default function HomePage() {
 
         if (searchRes.ok) {
           const data = await searchRes.json();
-          // Extract open-licensed catalogue items
+          // Extract open-licensed and online trending catalogue items
           const openProvider = data.results?.find((r: any) => r.providerCode === 'open_licensed');
           if (openProvider) {
             setOpenTracks(openProvider.tracks || []);
+          }
+
+          const onlineProvider = data.results?.find((r: any) => r.providerCode === 'audius_online');
+          if (onlineProvider) {
+            setOnlineTrending(onlineProvider.tracks || []);
           }
         }
       } catch (err) {
@@ -69,7 +75,7 @@ export default function HomePage() {
     loadHomeData();
   }, []);
 
-  const hasAnyContent = recentTracks.length > 0 || openTracks.length > 0;
+  const hasAnyContent = recentTracks.length > 0 || openTracks.length > 0 || onlineTrending.length > 0;
 
   return (
     <div className={styles.container}>
@@ -202,6 +208,33 @@ export default function HomePage() {
                 track={track}
                 index={idx}
                 playlistContext={openTracks}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Live Online Free Music Section */}
+      {onlineTrending.length > 0 && (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <h2 className={styles.sectionTitle}>Online Free Music Vault</h2>
+                <span className={styles.sectionBadge}>1M+ AD-FREE TRACKS</span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Instant in-app streaming with zero advertisements or accounts
+              </span>
+            </div>
+          </div>
+          <div className={styles.trackList}>
+            {onlineTrending.slice(0, 8).map((track, idx) => (
+              <TrackListItem
+                key={track.id}
+                track={track}
+                index={idx}
+                playlistContext={onlineTrending}
               />
             ))}
           </div>
