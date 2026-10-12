@@ -107,8 +107,67 @@ export class IndianMusicProvider implements CatalogueProvider {
       });
 
       const batchResults = await Promise.all(searchPromises);
-      const rawResults = batchResults.flatMap((b) => b.rawSongs);
-      const rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
+      let rawResults = batchResults.flatMap((b) => b.rawSongs);
+      let rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
+
+      // If specific search query provided, also query autocomplete.get for best official movie and song matches
+      if (q) {
+        try {
+          const autoUrl = `${SAAVN_API_BASE}?__call=autocomplete.get&_format=json&_marker=0&cc=in&query=${encodeURIComponent(
+            q
+          )}`;
+          const autoRes = await fetch(autoUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Accept: 'application/json, text/plain, */*',
+            },
+            next: { revalidate: 300 },
+          });
+
+          if (autoRes.ok) {
+            const autoJson = await autoRes.json();
+            const autoAlbums = (autoJson.albums?.data || []) as any[];
+            const autoSongs = (autoJson.songs?.data || []) as any[];
+
+            // Prepend autocomplete albums to ensure exact movie soundtrack matches are top-ranked
+            if (autoAlbums.length > 0) {
+              const formattedAutoAlbums = autoAlbums.map((al) => ({
+                albumid: al.id,
+                title: al.title,
+                image: al.image,
+                music: al.music,
+                year: al.more_info?.year || '2024',
+              }));
+              rawAlbumResults = [...formattedAutoAlbums, ...rawAlbumResults];
+            }
+
+            // Check if top autocomplete songs need metadata fetching
+            const existingSongIds = new Set(rawResults.map((s) => s.id));
+            const missingSongIds = autoSongs
+              .map((s) => s.id)
+              .filter((id) => id && !existingSongIds.has(id));
+
+            if (missingSongIds.length > 0) {
+              const pidsUrl = `${SAAVN_API_BASE}?__call=song.getDetails&_format=json&_marker=0&cc=in&pids=${encodeURIComponent(
+                missingSongIds.join(',')
+              )}`;
+              const pidsRes = await fetch(pidsUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                next: { revalidate: 300 },
+              }).then((r) => r.json()).catch(() => ({}));
+
+              for (const id of missingSongIds) {
+                if (pidsRes[id]) {
+                  rawResults.unshift(pidsRes[id]);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Autocomplete fetch error:', e);
+        }
+      }
 
       // Process and deduplicate songs
       const seenIds = new Set<string>();

@@ -31,6 +31,7 @@ export interface AlbumSummary {
   coverImage?: string | null;
   releaseYear?: number | null;
   artistName?: string;
+  genre?: string | null;
   isHiRes?: boolean;
   isLossless?: boolean;
 }

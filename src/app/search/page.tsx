@@ -1,15 +1,96 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search as SearchIcon, X, History, Film, Music2, User, AlertCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { Search as SearchIcon, X, History, Film, Music2, User, Play, AlertCircle, Sparkles } from 'lucide-react';
 import { TrackData, AlbumSummary, ArtistSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
+import { usePlayerStore } from '@/store/playerStore';
 import styles from './search.module.css';
 
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
 
+const POPULAR_SOUNDTRACKS: AlbumSummary[] = [
+  {
+    id: 'saavn-album-79759837',
+    title: 'Bethlehem Kudumba Unit',
+    artistName: 'Vishnu Vijay',
+    coverImage: 'https://c.saavncdn.com/569/Bethlehem-Kudumba-Unit-Malayalam-2026-20260901164324-500x500.jpg',
+    releaseYear: 2026,
+    genre: 'Malayalam / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-49113982',
+    title: 'Leo',
+    artistName: 'Anirudh Ravichander',
+    coverImage: 'https://c.saavncdn.com/415/Leo-Original-Motion-Picture-Soundtrack-English-2023-20231019170311-500x500.jpg',
+    releaseYear: 2023,
+    genre: 'Tamil / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-52210422',
+    title: 'Aavesham',
+    artistName: 'Sushin Shyam',
+    coverImage: 'https://c.saavncdn.com/202/Aavesham-Original-Motion-Picture-Soundtrack-Malayalam-2024-20240411130634-500x500.jpg',
+    releaseYear: 2024,
+    genre: 'Malayalam / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-47094777',
+    title: 'Jailer',
+    artistName: 'Anirudh Ravichander',
+    coverImage: 'https://c.saavncdn.com/777/Jailer-Tamil-2023-20230728183015-500x500.jpg',
+    releaseYear: 2023,
+    genre: 'Tamil / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-51419924',
+    title: 'Manjummel Boys',
+    artistName: 'Sushin Shyam',
+    coverImage: 'https://c.saavncdn.com/924/Manjummel-Boys-Original-Motion-Picture-Soundtrack-Malayalam-2024-20240222041203-500x500.jpg',
+    releaseYear: 2024,
+    genre: 'Malayalam / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-49986024',
+    title: 'ANIMAL',
+    artistName: 'Pritam',
+    coverImage: 'https://c.saavncdn.com/024/ANIMAL-Hindi-2023-20231124191427-500x500.jpg',
+    releaseYear: 2023,
+    genre: 'Hindi / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-35003732',
+    title: 'Vikram',
+    artistName: 'Anirudh Ravichander',
+    coverImage: 'https://c.saavncdn.com/732/Vikram-Tamil-2022-20220515182605-500x500.jpg',
+    releaseYear: 2022,
+    genre: 'Tamil / Soundtrack',
+    isLossless: true,
+  },
+  {
+    id: 'saavn-album-25118096',
+    title: 'The Highlights',
+    artistName: 'The Weeknd',
+    coverImage: 'https://c.saavncdn.com/396/The-Highlights-English-2021-20240207045714-500x500.jpg',
+    releaseYear: 2021,
+    genre: 'Global / Pop',
+    isLossless: true,
+  },
+];
+
 export default function SearchPage() {
+  const router = useRouter();
+  const { playTrack } = usePlayerStore();
+
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -56,7 +137,6 @@ export default function SearchPage() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}`);
         if (res.ok) {
           const data = await res.json();
-          // Aggregate from all providers
           const aggregatedTracks: TrackData[] = [];
           const aggregatedAlbums: AlbumSummary[] = [];
           const aggregatedArtists: ArtistSummary[] = [];
@@ -91,7 +171,6 @@ export default function SearchPage() {
             artists: aggregatedArtists,
           });
 
-          // Save to recent searches
           saveRecentSearch(debouncedQuery);
         }
       } catch (err) {
@@ -126,6 +205,41 @@ export default function SearchPage() {
     setResults({ tracks: [], albums: [], artists: [] });
   };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDebouncedQuery(query.trim());
+  };
+
+  // Top Result determination (Spotify style)
+  const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
+  const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
+
+  // Decide whether top match is an album or track
+  const isTopMatchAlbum = Boolean(
+    topAlbum &&
+      (topAlbum.title.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+        debouncedQuery.toLowerCase().includes(topAlbum.title.toLowerCase()))
+  );
+
+  const handlePlayTopResult = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isTopMatchAlbum && topAlbum) {
+      try {
+        const res = await fetch(`/api/albums/${topAlbum.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.album?.tracks?.length > 0) {
+            playTrack(data.album.tracks[0], data.album.tracks, 0);
+            return;
+          }
+        }
+      } catch {}
+      router.push(`/albums/${topAlbum.id}`);
+    } else if (topTrack) {
+      playTrack(topTrack, results.tracks, 0);
+    }
+  };
+
   const hasResults =
     results.tracks.length > 0 || results.albums.length > 0 || results.artists.length > 0;
 
@@ -133,17 +247,18 @@ export default function SearchPage() {
     <div className={styles.container}>
       <header className={styles.header}>
         <h1 className={styles.title}>Search</h1>
-        <div className={styles.searchBar}>
+        <form onSubmit={handleFormSubmit} className={styles.searchBar}>
           <SearchIcon size={20} className={styles.searchIcon} />
           <input
             type="search"
-            placeholder="Search movies, songs, artists..."
+            placeholder="Search movie soundtracks, songs, artists..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className={styles.input}
             autoComplete="off"
             autoCorrect="off"
             spellCheck="false"
+            enterKeyHint="search"
             aria-label="Search catalogue"
           />
           {query && (
@@ -156,7 +271,7 @@ export default function SearchPage() {
               <X size={18} />
             </button>
           )}
-        </div>
+        </form>
 
         {/* Category Tabs for Fast Filter */}
         {hasResults && (
@@ -174,7 +289,7 @@ export default function SearchPage() {
                 className={`${styles.filterPill} ${activeTab === 'movies' ? styles.filterPillActive : ''}`}
                 onClick={() => setActiveTab('movies')}
               >
-                Movie Soundtracks & Playlists ({results.albums.length})
+                Movie Soundtracks ({results.albums.length})
               </button>
             )}
             {results.tracks.length > 0 && (
@@ -207,35 +322,51 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* Recent Searches */}
-      {!query && recentSearches.length > 0 && (
-        <section className={styles.recentSection}>
-          <div className={styles.recentHeader}>
-            <div className={styles.recentTitleRow}>
-              <History size={16} />
-              <h2>Recent Searches</h2>
+      {/* Browse Trending Soundtracks When Input is Empty */}
+      {!query && (
+        <div className={styles.resultsContainer}>
+          {recentSearches.length > 0 && (
+            <section className={styles.recentSection}>
+              <div className={styles.recentHeader}>
+                <div className={styles.recentTitleRow}>
+                  <History size={16} />
+                  <h2>Recent Searches</h2>
+                </div>
+                <button
+                  type="button"
+                  className={styles.clearRecentBtn}
+                  onClick={handleClearRecent}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className={styles.pillsList}>
+                {recentSearches.map((term) => (
+                  <button
+                    key={term}
+                    type="button"
+                    className={styles.searchPill}
+                    onClick={() => setQuery(term)}
+                  >
+                    {term}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className={styles.section}>
+            <div className={styles.sectionTitleRow}>
+              <Film size={20} className={styles.sectionIcon} />
+              <h2 className={styles.sectionTitle}>Popular Movie Soundtracks</h2>
             </div>
-            <button
-              type="button"
-              className={styles.clearRecentBtn}
-              onClick={handleClearRecent}
-            >
-              Clear
-            </button>
-          </div>
-          <div className={styles.pillsList}>
-            {recentSearches.map((term) => (
-              <button
-                key={term}
-                type="button"
-                className={styles.searchPill}
-                onClick={() => setQuery(term)}
-              >
-                {term}
-              </button>
-            ))}
-          </div>
-        </section>
+            <div className={styles.albumsGrid}>
+              {POPULAR_SOUNDTRACKS.map((album) => (
+                <AlbumCard key={album.id} album={album} />
+              ))}
+            </div>
+          </section>
+        </div>
       )}
 
       {/* Empty State when no results found */}
@@ -244,7 +375,7 @@ export default function SearchPage() {
           <AlertCircle size={40} className={styles.noResultsIcon} />
           <h2>No matching audio found</h2>
           <p>
-            No results for &ldquo;{debouncedQuery}&rdquo;. Try searching for movie names like &ldquo;Bethlehem Kudumba Unit&rdquo;, &ldquo;Leo&rdquo;, or &ldquo;Aavesham&rdquo;.
+            No results for &ldquo;{debouncedQuery}&rdquo;. Try searching for &ldquo;Bethlehem Kudumba Unit&rdquo;, &ldquo;Leo&rdquo;, or &ldquo;Aavesham&rdquo;.
           </p>
         </div>
       )}
@@ -252,7 +383,60 @@ export default function SearchPage() {
       {/* Results View */}
       {!loading && hasResults && (
         <div className={styles.resultsContainer}>
-          {/* 1. MOVIE SOUNDTRACKS & PLAYLISTS (FEATURED FIRST) */}
+          {/* SPOTIFY-STYLE TOP RESULT CARD */}
+          {activeTab === 'all' && (isTopMatchAlbum ? topAlbum : topTrack) && (
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>Top Result</h2>
+              <div
+                className={styles.topResultCard}
+                onClick={() => {
+                  if (isTopMatchAlbum && topAlbum) {
+                    router.push(`/albums/${topAlbum.id}`);
+                  } else if (topTrack) {
+                    playTrack(topTrack, results.tracks, 0);
+                  }
+                }}
+              >
+                <div className={styles.topResultMain}>
+                  <Image
+                    src={
+                      (isTopMatchAlbum ? topAlbum?.coverImage : topTrack?.album?.coverImage) ||
+                      '/icons/default-artwork.png'
+                    }
+                    alt={(isTopMatchAlbum ? topAlbum?.title : topTrack?.title) || 'Result'}
+                    width={76}
+                    height={76}
+                    className={styles.topResultArt}
+                    unoptimized
+                  />
+                  <div className={styles.topResultMeta}>
+                    <span className={styles.topResultBadge}>
+                      {isTopMatchAlbum ? 'Movie Soundtrack / Playlist' : 'Song'}
+                    </span>
+                    <h3 className={styles.topResultTitle}>
+                      {isTopMatchAlbum ? topAlbum?.title : topTrack?.title}
+                    </h3>
+                    <p className={styles.topResultSubtitle}>
+                      {isTopMatchAlbum
+                        ? `${topAlbum?.artistName || 'Soundtrack'} • ${topAlbum?.releaseYear || 2026}`
+                        : `${topTrack?.artists?.map((a) => a.name).join(', ')} • ${topTrack?.album?.title || 'Single'}`}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className={styles.topResultPlayBtn}
+                  onClick={handlePlayTopResult}
+                  aria-label="Play Top Result"
+                >
+                  <Play size={22} fill="currentColor" style={{ marginLeft: 2 }} />
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* 1. MOVIE SOUNDTRACKS & PLAYLISTS */}
           {(activeTab === 'all' || activeTab === 'movies') && results.albums.length > 0 && (
             <section className={styles.section}>
               <div className={styles.sectionTitleRow}>
