@@ -553,6 +553,64 @@
   transform: translateY(-2px);
 }
 
+.importModeTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  background: var(--bg-surface-2);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.importModeTab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.importModeTabActive {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.modalTextarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.modalTextarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.infoBanner {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #93c5fd;
+  line-height: 1.4;
+  margin-top: 6px;
+}
+
 .submitBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

@@ -48,6 +48,7 @@ export default function LibraryPage() {
 
   // Import Playlist Modal State
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importMode, setImportMode] = useState<'url' | 'raw'>('url');
   const [importUrl, setImportUrl] = useState('');
   const [importCustomTitle, setImportCustomTitle] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -58,6 +59,7 @@ export default function LibraryPage() {
     totalRequested?: number;
     importedCount?: number;
     matchedCount?: number;
+    isEmbedLimited?: boolean;
     error?: string;
   } | null>(null);
 
@@ -562,7 +564,7 @@ export default function LibraryPage() {
                 <h3>Import Playlist (Spotify, YouTube & Web)</h3>
               </div>
               <p className={styles.modalDescription}>
-                Paste any Spotify playlist, JioSaavn link, or song titles to import with instant audio playback. 100% Free.
+                Import songs from Spotify or paste track titles. Every song matches with 100% full-length playable audio. 100% Free.
               </p>
             </div>
 
@@ -579,8 +581,13 @@ export default function LibraryPage() {
                       <strong>Imported &ldquo;{importResult.playlist?.title}&rdquo;!</strong>
                     </div>
                     <p className={styles.resultDetails}>
-                      {importResult.matchedCount} of {importResult.importedCount} songs matched with full playable audio streams.
+                      {importResult.matchedCount} of {importResult.importedCount} songs matched with 100% full playable audio (zero preview snippets).
                     </p>
+                    {importResult.isEmbedLimited && (
+                      <div className={styles.infoBanner}>
+                        💡 <strong>100 Tracks Imported</strong>: Spotify&rsquo;s public web embed returns up to 100 songs for free. If your playlist has 200+ songs, switch to &ldquo;Paste Song List&rdquo; tab to paste the remaining titles, or set <code>SPOTIFY_CLIENT_ID</code> in <code>.env</code>.
+                      </div>
+                    )}
                     <button
                       type="button"
                       className={styles.viewPlaylistBtn}
@@ -598,19 +605,53 @@ export default function LibraryPage() {
               </div>
             )}
 
+            <div className={styles.importModeTabs}>
+              <button
+                type="button"
+                className={`${styles.importModeTab} ${importMode === 'url' ? styles.importModeTabActive : ''}`}
+                onClick={() => setImportMode('url')}
+                disabled={isImporting}
+              >
+                Spotify / Web Link
+              </button>
+              <button
+                type="button"
+                className={`${styles.importModeTab} ${importMode === 'raw' ? styles.importModeTabActive : ''}`}
+                onClick={() => setImportMode('raw')}
+                disabled={isImporting}
+              >
+                Paste Song List (200+ Songs)
+              </button>
+            </div>
+
             <form onSubmit={handleImportPlaylist} className={styles.modalForm}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Spotify Link, YouTube Link, or Song List</label>
-                <input
-                  type="text"
-                  placeholder="https://open.spotify.com/playlist/... or song titles"
-                  value={importUrl}
-                  onChange={(e) => setImportUrl(e.target.value)}
-                  disabled={isImporting}
-                  required
-                  className={styles.modalInput}
-                />
-              </div>
+              {importMode === 'url' ? (
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Spotify Playlist Link or JioSaavn Link</label>
+                  <input
+                    type="text"
+                    placeholder="https://open.spotify.com/playlist/..."
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    disabled={isImporting}
+                    required
+                    className={styles.modalInput}
+                  />
+                </div>
+              ) : (
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Paste Song Names (One per line)</label>
+                  <textarea
+                    placeholder="Rasathi Unnai - P. Jayachandran&#10;Pehle Bhi Main - Vishal Mishra&#10;Melliname - Harish Raghavendra"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    disabled={isImporting}
+                    required
+                    rows={5}
+                    className={styles.modalTextarea}
+                  />
+                </div>
+              )}
 
               <div className={styles.fieldGroup}>
                 <label className={styles.fieldLabel}>Custom Title (Optional)</label>
@@ -627,7 +668,7 @@ export default function LibraryPage() {
               {isImporting && (
                 <div className={styles.importingStatus}>
                   <Loader2 size={18} className={styles.spinner} />
-                  <span>{importStatusText || 'Importing songs & matching 320 KBPS streams...'}</span>
+                  <span>{importStatusText || 'Importing songs & matching full audio streams...'}</span>
                 </div>
               )}
 

@@ -5,6 +5,9 @@ import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
 import { TrackData, PlaylistData } from '@/types/music';
 import { z } from 'zod';
 
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 const ImportPlaylistSchema = z.object({
   url: z.string().min(1, 'Playlist URL or song list is required'),
   customTitle: z.string().max(100).optional(),
@@ -23,9 +26,111 @@ interface ParsedPlaylist {
   description?: string;
   coverImage?: string | null;
   tracks: ParsedTrack[];
+  totalExpected?: number;
 }
 
-// 1. Fetch & Parse Spotify Playlist or Album
+function cleanTrackTitle(title: string): string {
+  if (!title) return '';
+  return title
+    .replace(/\s*\(From\s+[^)]+\)/gi, '')
+    .replace(/\s*\[From\s+[^\]]+\]/gi, '')
+    .replace(/\s*-\s*From\s+.*$/gi, '')
+    .replace(/\s*\(Remastered[^)]*\)/gi, '')
+    .replace(/\s*\[Remastered[^\]]*\]/gi, '')
+    .replace(/\s*\(Original[^)]*\)/gi, '')
+    .replace(/\s*\(Duet[^)]*\)/gi, '')
+    .replace(/\s*\(feat\.[^)]*\)/gi, '')
+    .replace(/\s*\[feat\.[^\]]*\]/gi, '')
+    .trim();
+}
+
+// 1. Fetch via Official Spotify Web API with Client Credentials (supports 200+ songs pagination)
+async function fetchOfficialSpotifyPlaylist(
+  id: string,
+  isAlbum: boolean,
+  clientId: string,
+  clientSecret: string
+): Promise<ParsedPlaylist | null> {
+  try {
+    const authString = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${authString}`,
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    if (!tokenRes.ok) {
+      console.warn('Spotify Client Credentials authentication failed:', await tokenRes.text());
+      return null;
+    }
+
+    const { access_token } = await tokenRes.json();
+    const endpointType = isAlbum ? 'albums' : 'playlists';
+
+    const metaRes = await fetch(`https://api.spotify.com/v1/${endpointType}/${id}`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+
+    if (!metaRes.ok) return null;
+    const meta = await metaRes.json();
+    const playlistName = meta.name || (isAlbum ? 'Imported Spotify Album' : 'Imported Spotify Playlist');
+    const description = meta.description || `Imported from Spotify • ${meta.owner?.display_name || ''}`;
+    const coverImage = meta.images?.[0]?.url || null;
+    const totalExpected = isAlbum ? meta.total_tracks : meta.tracks?.total;
+
+    const allTracks: ParsedTrack[] = [];
+    let offset = 0;
+    const limit = 100;
+    let hasMore = true;
+
+    while (hasMore && allTracks.length < 500) {
+      const pageUrl = isAlbum
+        ? `https://api.spotify.com/v1/albums/${id}/tracks?limit=${limit}&offset=${offset}`
+        : `https://api.spotify.com/v1/playlists/${id}/tracks?limit=${limit}&offset=${offset}&fields=items(track(name,artists(name),duration_ms,album(name,images))),next,total`;
+
+      const pageRes = await fetch(pageUrl, {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+
+      if (!pageRes.ok) break;
+      const pageData = await pageRes.json();
+      const items = pageData.items || [];
+
+      for (const item of items) {
+        const t = isAlbum ? item : item.track;
+        if (!t || !t.name) continue;
+        allTracks.push({
+          title: t.name,
+          artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : 'Unknown Artist',
+          duration: t.duration_ms ? Math.round(t.duration_ms / 1000) : 180,
+          coverImage: t.album?.images?.[0]?.url || coverImage,
+        });
+      }
+
+      if (pageData.next && items.length === limit) {
+        offset += limit;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    return {
+      title: playlistName,
+      description,
+      coverImage,
+      tracks: allTracks,
+      totalExpected: typeof totalExpected === 'number' ? totalExpected : allTracks.length,
+    };
+  } catch (err) {
+    console.warn('Error fetching official Spotify playlist:', err);
+    return null;
+  }
+}
+
+// 2. Fetch & Parse Spotify Playlist or Album (supports public embed up to 100 tracks, or official API)
 async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | null> {
   let url = rawUrl;
 
@@ -45,6 +150,17 @@ async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | nu
   const isAlbum = url.includes('/album/') || url.includes(':album:');
   const embedType = isAlbum ? 'album' : 'playlist';
 
+  // Attempt official Spotify API first if credentials are configured
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (clientId && clientSecret) {
+    const officialResult = await fetchOfficialSpotifyPlaylist(id, isAlbum, clientId, clientSecret);
+    if (officialResult && officialResult.tracks.length > 0) {
+      return officialResult;
+    }
+  }
+
+  // Fall back to scraping public Spotify Embed (returns up to 100 tracks without any API keys)
   try {
     const embedUrl = `https://open.spotify.com/embed/${embedType}/${id}`;
     const res = await fetch(embedUrl, {
@@ -71,7 +187,6 @@ async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | nu
             title: t.title || t.name || 'Unknown Track',
             artist: t.subtitle || t.artists?.[0]?.name || 'Unknown Artist',
             duration: t.duration ? Math.round(t.duration / 1000) : 180,
-            previewUrl: t.audioPreview?.url || null,
             coverImage,
           }));
 
@@ -80,6 +195,7 @@ async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | nu
             description,
             coverImage,
             tracks,
+            totalExpected: tracks.length,
           };
         }
       }
@@ -110,7 +226,7 @@ async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | nu
   return null;
 }
 
-// 2. Fetch & Parse JioSaavn Playlist or Album
+// 3. Fetch & Parse JioSaavn Playlist or Album
 async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null> {
   const match = url.match(/jiosaavn\.com\/(album|featured|song)\/([^/]+)\/([a-zA-Z0-9_-]+)/);
   if (!match) return null;
@@ -142,6 +258,7 @@ async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null
       description: 'Imported from JioSaavn',
       coverImage: (data.image || '').replace('150x150', '500x500'),
       tracks,
+      totalExpected: tracks.length,
     };
   } catch (err) {
     console.warn('Error parsing JioSaavn playlist:', err);
@@ -149,7 +266,7 @@ async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null
   }
 }
 
-// 3. Fallback: Parse Plain Text Tracklist (e.g. "Song Name - Artist Name" per line)
+// 4. Fallback: Parse Plain Text Tracklist (e.g. "Song Name - Artist Name" or pasted list)
 function parseRawTracklist(text: string): ParsedPlaylist {
   const lines = text
     .split(/\r?\n/)
@@ -165,7 +282,11 @@ function parseRawTracklist(text: string): ParsedPlaylist {
     let title = cleaned;
     let artist = 'Various Artists';
 
-    if (cleaned.includes(' - ')) {
+    if (cleaned.includes('\t')) {
+      const parts = cleaned.split('\t');
+      title = parts[0].trim();
+      artist = parts[1]?.trim() || 'Various Artists';
+    } else if (cleaned.includes(' - ')) {
       const parts = cleaned.split(' - ');
       title = parts[0].trim();
       artist = parts.slice(1).join(' - ').trim();
@@ -186,52 +307,78 @@ function parseRawTracklist(text: string): ParsedPlaylist {
     title: 'Custom Imported Playlist',
     description: `Imported song list • ${tracks.length} tracks`,
     tracks,
+    totalExpected: tracks.length,
   };
 }
 
-// Helper: Search JioSaavn to match a track and retrieve high quality 320 KBPS playable audio stream, with YouTube fallback
+// 5. Helper: Smart match track on JioSaavn (320 KBPS AAC) or fallback to full YouTube audio (Zero preview clips!)
 async function matchPlayableStream(title: string, artist: string) {
-  const query = `${title} ${artist}`.trim();
-  const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(query)}`;
+  const cleanTitle = cleanTrackTitle(title);
+  const titleTokens = cleanTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+  const primaryArtist = artist.split(/[,&]/)[0].trim();
 
-  try {
-    const res = await fetch(searchUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+  // Try JioSaavn with title + artist, then just cleaned title
+  const searchQueries = [
+    `${cleanTitle} ${primaryArtist}`.trim(),
+    cleanTitle,
+  ];
 
-    if (res.ok) {
-      const data = await res.json();
-      const results = (data.results || []) as any[];
-      if (results.length > 0) {
-        const top = results[0];
-        let streamUrl = decryptMediaUrl(top.encrypted_media_url);
-        if (streamUrl) {
-          // Upgrade to 320 KBPS AAC
-          streamUrl = streamUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
-          return {
-            streamUrl,
-            matchedTitle: decodeHtmlEntities(top.song || top.title || title),
-            matchedArtist: decodeHtmlEntities(top.primary_artists || top.singers || artist),
-            albumTitle: decodeHtmlEntities(top.album || `${title} - Single`),
-            coverImage: (top.image || '').replace('150x150', '500x500'),
-            duration: top.duration ? parseInt(top.duration, 10) : 180,
-            year: top.year ? parseInt(top.year, 10) : undefined,
-            genre: top.language || 'Music',
-            providerCode: 'saavn',
-          };
+  for (const q of searchQueries) {
+    if (!q) continue;
+    try {
+      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(q)}`;
+      const res = await fetch(searchUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const results = (data.results || []) as any[];
+
+        for (const item of results) {
+          const songName = (item.song || item.title || '').toLowerCase();
+          const hasTitleOverlap =
+            titleTokens.length === 0 || titleTokens.some((t) => songName.includes(t));
+
+          if (hasTitleOverlap && item.encrypted_media_url) {
+            let streamUrl = decryptMediaUrl(item.encrypted_media_url);
+            if (streamUrl) {
+              // Upgrade to highest quality 320 KBPS AAC stream
+              streamUrl = streamUrl
+                .replace(/_96\.(mp4|m4a)/i, '_320.$1')
+                .replace(/_160\.(mp4|m4a)/i, '_320.$1');
+
+              return {
+                streamUrl,
+                matchedTitle: decodeHtmlEntities(item.song || item.title || title),
+                matchedArtist: decodeHtmlEntities(item.primary_artists || item.singers || artist),
+                albumTitle: decodeHtmlEntities(item.album || `${title} - Single`),
+                coverImage: (item.image || '').replace('150x150', '500x500'),
+                duration: item.duration ? parseInt(item.duration, 10) : 180,
+                year: item.year ? parseInt(item.year, 10) : undefined,
+                genre: item.language || 'Music',
+                providerCode: 'saavn',
+              };
+            }
+          }
         }
       }
+    } catch {
+      // Continue to next query or YouTube fallback
     }
-  } catch (err) {
-    console.warn(`Could not match track "${query}" on JioSaavn:`, err);
   }
 
-  // Fallback to YouTube for 100% catalog coverage
+  // Fallback to YouTube for full-length song coverage (NO 30-second clips!)
   try {
-    const ytVideos = await searchYouTubeVideos(query, 1);
+    const ytQuery = `${cleanTitle} ${primaryArtist}`.trim() || title;
+    const ytVideos = await searchYouTubeVideos(ytQuery, 1);
     if (ytVideos.length > 0) {
       const topYt = ytVideos[0];
       return {
@@ -248,7 +395,7 @@ async function matchPlayableStream(title: string, artist: string) {
       };
     }
   } catch (ytErr) {
-    console.warn(`Could not match track "${query}" on YouTube:`, ytErr);
+    console.warn(`Could not match track "${title}" on YouTube:`, ytErr);
   }
 
   return null;
@@ -275,7 +422,6 @@ export async function POST(request: NextRequest) {
 
     // Fallback: plain text list of songs
     if (!parsedPlaylist || parsedPlaylist.tracks.length === 0) {
-      // Only parse as plain text if it looks like a track list and not a broken URL
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         parsedPlaylist = parseRawTracklist(url);
       }
@@ -296,71 +442,84 @@ export async function POST(request: NextRequest) {
     let playlistFirstCover: string | null = parsedPlaylist.coverImage || null;
     let matchedCount = 0;
 
-    // Process up to 50 tracks
-    const tracksToProcess = parsedPlaylist.tracks.slice(0, 50);
+    // Process up to 300 tracks (removed arbitrary 50 limit)
+    const tracksToProcess = parsedPlaylist.tracks.slice(0, 300);
     const fullTracks: TrackData[] = [];
 
-    for (let i = 0; i < tracksToProcess.length; i++) {
-      const item = tracksToProcess[i];
-      try {
-        const match = await matchPlayableStream(item.title, item.artist);
+    // Concurrent batch processing (8 songs in parallel for high speed)
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < tracksToProcess.length; i += BATCH_SIZE) {
+      const chunk = tracksToProcess.slice(i, i + BATCH_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map(async (item, chunkOffset) => {
+          const globalIdx = i + chunkOffset;
+          try {
+            const match = await matchPlayableStream(item.title, item.artist);
 
-        const trackTitle = match?.matchedTitle || item.title;
-        const artistName = match?.matchedArtist || item.artist || 'Unknown Artist';
-        const albumName = match?.albumTitle || `${trackTitle} - Single`;
-        const coverImage = match?.coverImage || item.coverImage || '/icons/default-artwork.png';
-        const streamUrl = match?.streamUrl || item.previewUrl || '';
-        const duration = match?.duration || item.duration || 180;
-        const isYt = match?.providerCode === 'youtube' || streamUrl.startsWith('youtube:');
+            const trackTitle = match?.matchedTitle || item.title;
+            const artistName = match?.matchedArtist || item.artist || 'Unknown Artist';
+            const albumName = match?.albumTitle || `${trackTitle} - Single`;
+            const coverImage = match?.coverImage || item.coverImage || '/icons/default-artwork.png';
+            // CRITICAL: NEVER use previewUrl! Only use full audio stream from JioSaavn or YouTube
+            const streamUrl = match?.streamUrl || '';
+            const duration = match?.duration || item.duration || 180;
+            const isYt = match?.providerCode === 'youtube' || streamUrl.startsWith('youtube:');
 
-        if (!playlistFirstCover && coverImage && !coverImage.includes('default-artwork')) {
-          playlistFirstCover = coverImage;
+            const trackId = isYt
+              ? `yt-${match?.youtubeId || streamUrl.replace('youtube:', '')}`
+              : `track_${Date.now()}_${globalIdx}`;
+
+            const trackObj: TrackData = {
+              id: trackId,
+              title: trackTitle,
+              duration,
+              trackNumber: globalIdx + 1,
+              genre: match?.genre || 'Soundtrack',
+              artists: [{ id: `art_${globalIdx}`, name: artistName, image: coverImage }],
+              album: {
+                id: `alb_${globalIdx}`,
+                title: albumName,
+                coverImage,
+                releaseYear: match?.year || new Date().getFullYear(),
+                isLossless: !isYt,
+              },
+              assets: streamUrl
+                ? [
+                    {
+                      id: `asset_${globalIdx}`,
+                      trackId,
+                      format: isYt ? 'm4a' : 'mp4',
+                      codec: 'AAC',
+                      bitrate: isYt ? 160 : 320,
+                      isLossless: !isYt,
+                      isHiRes: false,
+                      storageType: 'remote_stream',
+                      storageKey: streamUrl,
+                      duration,
+                    },
+                  ]
+                : [],
+              streamUrl: streamUrl || undefined,
+              providerCode: isYt ? 'youtube' : 'saavn',
+              externalUrl: isYt ? `https://www.youtube.com/watch?v=${match?.youtubeId}` : undefined,
+            };
+
+            return { trackObj, streamUrl, coverImage };
+          } catch (trackErr) {
+            console.warn(`Error processing track ${item.title}:`, trackErr);
+            return null;
+          }
+        })
+      );
+
+      for (const r of chunkResults) {
+        if (r) {
+          if (!playlistFirstCover && r.coverImage && !r.coverImage.includes('default-artwork')) {
+            playlistFirstCover = r.coverImage;
+          }
+          if (r.streamUrl) matchedCount++;
+          fullTracks.push(r.trackObj);
         }
-
-        if (streamUrl) matchedCount++;
-
-        const trackId = isYt
-          ? `yt-${match?.youtubeId || streamUrl.replace('youtube:', '')}`
-          : `track_${Date.now()}_${i}`;
-
-        const trackObj: TrackData = {
-          id: trackId,
-          title: trackTitle,
-          duration,
-          trackNumber: i + 1,
-          genre: match?.genre || 'Soundtrack',
-          artists: [{ id: `art_${i}`, name: artistName, image: coverImage }],
-          album: {
-            id: `alb_${i}`,
-            title: albumName,
-            coverImage,
-            releaseYear: match?.year || new Date().getFullYear(),
-            isLossless: !isYt,
-          },
-          assets: streamUrl
-            ? [
-                {
-                  id: `asset_${i}`,
-                  trackId,
-                  format: isYt ? 'm4a' : 'mp4',
-                  codec: 'AAC',
-                  bitrate: isYt ? 160 : 320,
-                  isLossless: !isYt,
-                  isHiRes: false,
-                  storageType: 'remote_stream',
-                  storageKey: streamUrl,
-                  duration,
-                },
-              ]
-            : [],
-          streamUrl: streamUrl || undefined,
-          providerCode: isYt ? 'youtube' : 'saavn',
-          externalUrl: isYt ? `https://www.youtube.com/watch?v=${match?.youtubeId}` : undefined,
-        };
-
-        fullTracks.push(trackObj);
-      } catch (trackErr) {
-        console.warn(`Error processing track ${item.title}:`, trackErr);
       }
     }
 
@@ -379,115 +538,143 @@ export async function POST(request: NextRequest) {
       })),
     };
 
-    // Safely attempt to persist to Prisma if DB is available (never throws 500 if DB is down)
+    // Safely attempt to persist to Prisma if DB is available (guarded by timeout to prevent Vercel 500)
     try {
-      let user = await prisma.user.findFirst();
-      if (!user) {
-        user = await prisma.user.create({
-          data: {
-            email: 'listener@imusic.local',
-            name: 'Audiophile',
-            role: 'user',
-          },
-        });
-      }
-
-      const dbPlaylist = await prisma.playlist.create({
-        data: {
-          title: finalTitle,
-          description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
-          coverImage: playlistResponse.coverImage,
-          userId: user.id,
-        },
-      });
-
-      playlistResponse.id = dbPlaylist.id;
-
-      // Upsert tracks in DB
-      for (let i = 0; i < fullTracks.length; i++) {
-        const t = fullTracks[i];
-        try {
-          const artistName = t.artists[0]?.name || 'Unknown Artist';
-          let artist = await prisma.artist.findFirst({ where: { name: artistName } });
-          if (!artist) {
-            artist = await prisma.artist.create({
-              data: { name: artistName, image: t.album?.coverImage },
-            });
-          }
-
-          const albumName = t.album?.title || `${t.title} - Single`;
-          let album = await prisma.album.findFirst({ where: { title: albumName, artistId: artist.id } });
-          if (!album) {
-            album = await prisma.album.create({
-              data: {
-                title: albumName,
-                artistId: artist.id,
-                coverImage: t.album?.coverImage,
-                releaseYear: t.album?.releaseYear || new Date().getFullYear(),
-                isLossless: true,
-              },
-            });
-          }
-
-          let dbTrack = await prisma.track.findFirst({
-            where: { title: t.title, albumId: album.id },
-          });
-
-          if (!dbTrack) {
-            dbTrack = await prisma.track.create({
-              data: {
-                title: t.title,
-                albumId: album.id,
-                duration: t.duration,
-                genre: t.genre || 'Soundtrack',
-                trackNumber: i + 1,
-                artists: {
-                  create: {
-                    artistId: artist.id,
-                    role: 'primary',
-                  },
-                },
-                assets: t.streamUrl
-                  ? {
-                      create: {
-                        format: 'mp4',
-                        codec: 'AAC',
-                        bitDepth: 16,
-                        sampleRate: 44100,
-                        bitrate: 320,
-                        isLossless: true,
-                        isHiRes: false,
-                        storageType: 'remote_stream',
-                        storageKey: t.streamUrl,
-                        duration: t.duration,
-                      },
-                    }
-                  : undefined,
-              },
-            });
-          }
-
-          await prisma.playlistTrack.create({
+      const dbPersistPromise = async () => {
+        let user = await prisma.user.findFirst();
+        if (!user) {
+          user = await prisma.user.create({
             data: {
-              playlistId: dbPlaylist.id,
-              trackId: dbTrack.id,
-              position: i + 1,
+              email: 'listener@imusic.local',
+              name: 'Audiophile',
+              role: 'user',
             },
           });
-        } catch (dbTrackErr) {
-          console.warn(`Could not persist track ${t.title} to DB:`, dbTrackErr);
         }
-      }
+
+        const dbPlaylist = await prisma.playlist.create({
+          data: {
+            title: finalTitle,
+            description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
+            coverImage: playlistResponse.coverImage,
+            userId: user.id,
+          },
+        });
+
+        playlistResponse.id = dbPlaylist.id;
+
+        // In-memory caches to minimize DB queries
+        const artistCache = new Map<string, string>();
+        const albumCache = new Map<string, string>();
+
+        for (let i = 0; i < fullTracks.length; i++) {
+          const t = fullTracks[i];
+          try {
+            const artistName = t.artists[0]?.name || 'Unknown Artist';
+            let artistId = artistCache.get(artistName);
+            if (!artistId) {
+              let artist = await prisma.artist.findFirst({ where: { name: artistName } });
+              if (!artist) {
+                artist = await prisma.artist.create({
+                  data: { name: artistName, image: t.album?.coverImage },
+                });
+              }
+              artistId = artist.id;
+              artistCache.set(artistName, artistId);
+            }
+
+            const albumName = t.album?.title || `${t.title} - Single`;
+            const albumKey = `${albumName}_${artistId}`;
+            let albumId = albumCache.get(albumKey);
+            if (!albumId) {
+              let album = await prisma.album.findFirst({ where: { title: albumName, artistId } });
+              if (!album) {
+                album = await prisma.album.create({
+                  data: {
+                    title: albumName,
+                    artistId,
+                    coverImage: t.album?.coverImage,
+                    releaseYear: t.album?.releaseYear || new Date().getFullYear(),
+                    isLossless: true,
+                  },
+                });
+              }
+              albumId = album.id;
+              albumCache.set(albumKey, albumId);
+            }
+
+            let dbTrack = await prisma.track.findFirst({
+              where: { title: t.title, albumId },
+            });
+
+            if (!dbTrack) {
+              dbTrack = await prisma.track.create({
+                data: {
+                  title: t.title,
+                  albumId,
+                  duration: t.duration,
+                  genre: t.genre || 'Soundtrack',
+                  trackNumber: i + 1,
+                  artists: {
+                    create: {
+                      artistId,
+                      role: 'primary',
+                    },
+                  },
+                  assets: t.streamUrl
+                    ? {
+                        create: {
+                          format: 'mp4',
+                          codec: 'AAC',
+                          bitDepth: 16,
+                          sampleRate: 44100,
+                          bitrate: 320,
+                          isLossless: true,
+                          isHiRes: false,
+                          storageType: 'remote_stream',
+                          storageKey: t.streamUrl,
+                          duration: t.duration,
+                        },
+                      }
+                    : undefined,
+                },
+              });
+            }
+
+            await prisma.playlistTrack.create({
+              data: {
+                playlistId: dbPlaylist.id,
+                trackId: dbTrack.id,
+                position: i + 1,
+              },
+            });
+          } catch (trackDbErr) {
+            console.warn(`Could not persist track ${t.title} to DB:`, trackDbErr);
+          }
+        }
+      };
+
+      // Ensure DB persistence does not exceed 4 seconds
+      await Promise.race([
+        dbPersistPromise(),
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ]);
     } catch (dbErr) {
-      console.warn('Prisma DB not available on this host; playlist will be stored in client LocalLibrary:', dbErr);
+      console.warn('Prisma DB not available or slow; stored in client LocalLibrary:', dbErr);
     }
+
+    const isEmbedLimited =
+      parsedPlaylist.tracks.length === 100 &&
+      !process.env.SPOTIFY_CLIENT_ID &&
+      (url.includes('spotify.com') || url.includes('spotify.link'));
 
     return NextResponse.json({
       success: true,
       playlist: playlistResponse,
-      totalRequested: parsedPlaylist.tracks.length,
+      totalRequested: parsedPlaylist.totalExpected || parsedPlaylist.tracks.length,
       importedCount: fullTracks.length,
       matchedCount,
+      isEmbedLimited,
     });
   } catch (error: any) {
     console.error('Error importing playlist:', error);
