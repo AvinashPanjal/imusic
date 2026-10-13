@@ -215,7 +215,31 @@ export const AudioEngine: React.FC = () => {
     if (typeof window === 'undefined') return;
 
     const initYt = () => {
+      if (typeof window === 'undefined') return;
       if (ytPlayerRef.current || !window.YT?.Player) return;
+
+      // Ensure persistent container exists on document.body outside React Virtual DOM
+      let container = document.getElementById('imusic-yt-persistent-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'imusic-yt-persistent-container';
+        container.style.position = 'fixed';
+        container.style.bottom = '0px';
+        container.style.right = '0px';
+        container.style.width = '200px';
+        container.style.height = '200px';
+        container.style.opacity = '0.001';
+        container.style.pointerEvents = 'none';
+        container.style.zIndex = '-1';
+
+        const placeholder = document.createElement('div');
+        placeholder.id = 'imusic-yt-iframe';
+        placeholder.style.width = '100%';
+        placeholder.style.height = '100%';
+        container.appendChild(placeholder);
+        document.body.appendChild(container);
+      }
+
       try {
         ytPlayerRef.current = new window.YT.Player('imusic-yt-iframe', {
           height: '200',
@@ -237,7 +261,8 @@ export const AudioEngine: React.FC = () => {
                 const vid = pendingYtVideoIdRef.current;
                 pendingYtVideoIdRef.current = null;
                 ytPlayerRef.current.loadVideoById(vid);
-                const targetVol = isMuted ? 0 : Math.round(volume * 100);
+                const state = usePlayerStore.getState();
+                const targetVol = state.isMuted ? 0 : Math.round(state.volume * 100);
                 ytPlayerRef.current.setVolume(targetVol);
                 ytPlayerRef.current.playVideo();
               }
@@ -317,7 +342,7 @@ export const AudioEngine: React.FC = () => {
     return () => {
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
     };
-  }, [nextTrack, setError, setIsLoading, setIsPlaying, setNetworkInterrupted, isMuted, volume]);
+  }, [nextTrack, setError, setIsLoading, setIsPlaying, setNetworkInterrupted]);
 
   // Handle track source changes
   useEffect(() => {
@@ -333,24 +358,15 @@ export const AudioEngine: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
-    const isYt = isYouTubeTrack(currentTrack);
+    let active = true;
 
-    // ============================================
-    // PATH A: YOUTUBE TRACK
-    // ============================================
-    if (isYt) {
-      // Pause HTML5 audio and detach src without triggering error event
+    // Helper to start YouTube playback
+    const startYouTubePlayback = (vid: string) => {
+      if (!active) return;
       if (audio) {
         audio.pause();
         audio.removeAttribute('src');
         audio.load();
-      }
-
-      const vid = getYouTubeVideoId(currentTrack);
-      if (!vid) {
-        setError('YouTube video ID not found for this track');
-        setIsLoading(false);
-        return;
       }
 
       updateMediaSession(currentTrack);
@@ -368,7 +384,6 @@ export const AudioEngine: React.FC = () => {
         pendingYtVideoIdRef.current = vid;
       }
 
-      // Start progress sync interval for YouTube
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
       ytProgressIntervalRef.current = setInterval(() => {
         if (ytPlayerRef.current?.getCurrentTime) {
@@ -380,37 +395,27 @@ export const AudioEngine: React.FC = () => {
           } catch {}
         }
       }, 350);
+    };
 
-      return;
-    }
+    // Helper to start standard HTML5 audio playback (320 KBPS AAC)
+    const startAudioPlayback = (streamUrl: string) => {
+      if (!active || !audio) return;
 
-    // ============================================
-    // PATH B: STANDARD AUDIO TRACK (320 KBPS AAC)
-    // ============================================
-    if (!audio) return;
+      if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
+      if (isYtReadyRef.current && ytPlayerRef.current?.pauseVideo) {
+        try {
+          ytPlayerRef.current.pauseVideo();
+        } catch {}
+      }
 
-    // Clear YouTube interval & pause YouTube player
-    if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
-    if (isYtReadyRef.current && ytPlayerRef.current?.pauseVideo) {
-      try {
-        ytPlayerRef.current.pauseVideo();
-      } catch {}
-    }
-
-    const targetVol = isMuted ? 0 : Math.max(0, Math.min(1, volume));
-    try {
-      audio.volume = targetVol;
-      audio.muted = isMuted;
-    } catch {}
-
-    // Fast path: if streamUrl is already known, load synchronously
-    if (currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')) {
-      audio.src = currentTrack.streamUrl;
-      audio.load();
+      const targetVol = isMuted ? 0 : Math.max(0, Math.min(1, volume));
       try {
         audio.volume = targetVol;
         audio.muted = isMuted;
       } catch {}
+
+      audio.src = streamUrl;
+      audio.load();
       updateMediaSession(currentTrack);
 
       if (isPlaying) {
@@ -426,40 +431,33 @@ export const AudioEngine: React.FC = () => {
           });
         }
       }
+    };
+
+    // FAST PATH: Direct standard audio URL already known
+    if (currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')) {
+      startAudioPlayback(currentTrack.streamUrl);
       return;
     }
 
-    let active = true;
-
-    resolveTrackUrl(currentTrack).then((url) => {
-      if (!active || !audio) return;
-      if (!url) {
-        setError('Playback source not found or unavailable for this track');
-        setIsLoading(false);
+    // RESOLVE PATH: Resolve track to studio AAC stream or YouTube stream
+    resolveTrackUrl(currentTrack).then((resolvedUrl) => {
+      if (!active) return;
+      if (!resolvedUrl) {
+        const vid = getYouTubeVideoId(currentTrack);
+        if (vid) {
+          startYouTubePlayback(vid);
+        } else {
+          setError('Playback source not found or unavailable for this track');
+          setIsLoading(false);
+        }
         return;
       }
 
-      audio.src = url;
-      audio.load();
-      try {
-        audio.volume = targetVol;
-        audio.muted = isMuted;
-      } catch {}
-
-      updateMediaSession(currentTrack);
-
-      if (isPlaying) {
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            if (err.name === 'NotAllowedError') {
-              console.warn('Playback blocked by browser autoplay policy');
-              setIsPlaying(false);
-            } else {
-              console.warn('Audio play error:', err);
-            }
-          });
-        }
+      if (resolvedUrl.startsWith('youtube:')) {
+        const vid = resolvedUrl.replace('youtube:', '');
+        startYouTubePlayback(vid);
+      } else {
+        startAudioPlayback(resolvedUrl);
       }
     });
 
@@ -687,7 +685,29 @@ export const AudioEngine: React.FC = () => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const state = usePlayerStore.getState();
-        if (state.isPlaying && audioRef.current && audioRef.current.paused) {
+        const isYt = isYouTubeTrack(state.currentTrack);
+        if (state.isPlaying) {
+          if (isYt && ytPlayerRef.current?.playVideo) {
+            try {
+              ytPlayerRef.current.playVideo();
+            } catch {}
+          } else if (audioRef.current && audioRef.current.paused) {
+            audioRef.current.play().catch(() => {});
+          }
+        }
+      }
+    };
+
+    const handlePopState = () => {
+      // Keep playing uninterrupted when user navigates back / forward in browser history
+      const state = usePlayerStore.getState();
+      const isYt = isYouTubeTrack(state.currentTrack);
+      if (state.isPlaying) {
+        if (isYt && ytPlayerRef.current?.playVideo) {
+          try {
+            ytPlayerRef.current.playVideo();
+          } catch {}
+        } else if (audioRef.current && audioRef.current.paused) {
           audioRef.current.play().catch(() => {});
         }
       }
@@ -696,6 +716,7 @@ export const AudioEngine: React.FC = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('popstate', handlePopState);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -709,6 +730,7 @@ export const AudioEngine: React.FC = () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('popstate', handlePopState);
     };
   }, [
     updatePlaybackProgress,
@@ -727,38 +749,20 @@ export const AudioEngine: React.FC = () => {
   ]);
 
   return (
-    <>
-      <audio
-        ref={audioRef}
-        playsInline
-        preload="auto"
-        style={{
-          position: 'fixed',
-          top: '-9999px',
-          left: '-9999px',
-          width: '1px',
-          height: '1px',
-          opacity: 0.001,
-          pointerEvents: 'none',
-        }}
-        aria-hidden="true"
-      />
-      <div
-        id="imusic-yt-container"
-        style={{
-          position: 'fixed',
-          bottom: '0px',
-          right: '0px',
-          width: '200px',
-          height: '200px',
-          opacity: 0.001,
-          pointerEvents: 'none',
-          zIndex: -1,
-        }}
-        aria-hidden="true"
-      >
-        <div id="imusic-yt-iframe" style={{ width: '100%', height: '100%' }} />
-      </div>
-    </>
+    <audio
+      ref={audioRef}
+      playsInline
+      preload="auto"
+      style={{
+        position: 'fixed',
+        top: '-9999px',
+        left: '-9999px',
+        width: '1px',
+        height: '1px',
+        opacity: 0.001,
+        pointerEvents: 'none',
+      }}
+      aria-hidden="true"
+    />
   );
 };

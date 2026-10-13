@@ -88,9 +88,84 @@ export async function POST(request: NextRequest) {
 
     const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
 
-    // Check if this is an external track (saavn- or yt-) or needs external stream recovery
-    if (trackId.startsWith('saavn-') || trackId.startsWith('yt-') || !trackId) {
-      const rawId = trackId.replace(/^(saavn-|yt-)/, '');
+    // If this is a YouTube track, quickly check if a studio 320 KBPS AAC version exists on JioSaavn
+    if (trackId.startsWith('yt-')) {
+      const vid = trackId.replace(/^yt-/, '');
+      const rawTitle = title || '';
+      const clean = cleanSongTitle(rawTitle);
+
+      const candidateQueries: string[] = [];
+      if (clean && clean.length >= 2) {
+        candidateQueries.push(clean);
+        if (clean.includes('-')) {
+          const parts = clean.split('-').map((p) => p.trim()).filter((p) => p.length >= 2);
+          for (const p of parts) {
+            candidateQueries.push(p);
+          }
+        }
+      }
+      if (artist && clean) {
+        candidateQueries.push(`${clean} ${artist}`);
+      }
+
+      for (const query of candidateQueries) {
+        try {
+          const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(query)}`;
+          const sRes = await fetch(searchUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          });
+          if (sRes.ok) {
+            const data = await sRes.json();
+            const results = (data.results || []) as any[];
+            if (results.length > 0) {
+              const top = results[0];
+              let directUrl = decryptMediaUrl(top.encrypted_media_url);
+              if (directUrl) {
+                directUrl = directUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
+                return NextResponse.json({
+                  streamUrl: directUrl,
+                  trackId,
+                  title: top.song || top.title || rawTitle || 'Audio Track',
+                  recovered: true,
+                  asset: {
+                    id: `asset-${vid}`,
+                    format: 'mp4',
+                    codec: 'AAC',
+                    bitDepth: 16,
+                    sampleRate: 44100,
+                    bitrate: 320,
+                    isLossless: true,
+                    isHiRes: false,
+                  },
+                });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      return NextResponse.json({
+        streamUrl: `youtube:${vid}`,
+        trackId,
+        title: rawTitle || 'YouTube Track',
+        recovered: false,
+        asset: {
+          id: `yt-asset-${vid}`,
+          format: 'm4a',
+          codec: 'AAC',
+          bitrate: 160,
+          isLossless: false,
+          isHiRes: false,
+        },
+      });
+    }
+
+    // Check if this is a JioSaavn external track or needs external stream recovery
+    if (trackId.startsWith('saavn-') || !trackId) {
+      const rawId = trackId.replace('saavn-', '');
       const saavnResult = await resolveJioSaavnStream(rawId, title);
       if (saavnResult?.streamUrl) {
         return NextResponse.json({
@@ -106,24 +181,6 @@ export async function POST(request: NextRequest) {
             sampleRate: 44100,
             bitrate: 320,
             isLossless: true,
-            isHiRes: false,
-          },
-        });
-      }
-
-      if (trackId.startsWith('yt-')) {
-        const vid = trackId.replace(/^yt-/, '');
-        return NextResponse.json({
-          streamUrl: `youtube:${vid}`,
-          trackId,
-          title: title || 'YouTube Track',
-          recovered: false,
-          asset: {
-            id: `yt-asset-${vid}`,
-            format: 'm4a',
-            codec: 'AAC',
-            bitrate: 160,
-            isLossless: false,
             isHiRes: false,
           },
         });
