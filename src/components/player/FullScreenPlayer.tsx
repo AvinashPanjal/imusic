@@ -18,6 +18,7 @@ import {
   ListMusic,
   Mic2,
   Volume2,
+  Volume1,
   VolumeX,
   Trash2,
   ArrowUp,
@@ -331,21 +332,34 @@ export const FullScreenPlayer: React.FC = () => {
                   type="button"
                   className={styles.volumeIconBtn}
                   onClick={toggleMute}
-                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
                 >
-                  {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                  {isMuted || volume === 0 ? (
+                    <VolumeX size={18} />
+                  ) : volume < 0.5 ? (
+                    <Volume1 size={18} />
+                  ) : (
+                    <Volume2 size={18} />
+                  )}
                 </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => setVolume(parseFloat(e.target.value))}
-                  onInput={(e) => setVolume(parseFloat((e.target as HTMLInputElement).value))}
-                  className={styles.volumeSlider}
-                  aria-label="Volume slider"
-                />
+                <div className={styles.sliderContainer}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => setVolume(parseFloat(e.target.value))}
+                    className={styles.volumeSlider}
+                    aria-label="Volume slider"
+                    style={{
+                      background: `linear-gradient(to right, var(--text-primary) 0%, var(--text-primary) ${(isMuted ? 0 : volume) * 100}%, var(--bg-surface-3) ${(isMuted ? 0 : volume) * 100}%, var(--bg-surface-3) 100%)`,
+                    }}
+                  />
+                </div>
+                <span className={styles.volumePercentText}>
+                  {Math.round((isMuted ? 0 : volume) * 100)}%
+                </span>
               </div>
               {isIOS && (
                 <div className={styles.iosVolumeNotice}>

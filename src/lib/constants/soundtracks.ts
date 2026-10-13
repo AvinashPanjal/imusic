@@ -3,6 +3,7 @@ import { AlbumSummary } from '@/types/music';
 export interface FeaturedSoundtrack extends AlbumSummary {
   totalTracks?: number;
   artist?: { id: string; name: string };
+  trackTitles?: string[];
 }
 
 export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
@@ -17,6 +18,18 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-vishnu', name: 'Vishnu Vijay' },
+    trackTitles: [
+      'Illey Illa',
+      'Maanthrikam',
+      'Indrajaalam',
+      'Varnajaalam',
+      'Muttayi Vandi',
+      'Kanmaniye',
+      'Pidithara',
+      'Cha Cha Chi Chi Choo',
+      'Rakthasahodaran',
+      'Kochuthanuppu',
+    ],
   },
   {
     id: 'saavn-album-55472703',
@@ -29,6 +42,12 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-536175', name: 'S. P. Venkatesh' },
+    trackTitles: [
+      'Kunjikiliye Koodevide',
+      'Vilkkaanundo Swapnangal',
+      'Paayunna Yaagaaswam',
+      'Indrajaalam',
+    ],
   },
   {
     id: 'saavn-album-49113982',
@@ -41,6 +60,15 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-anirudh', name: 'Anirudh Ravichander' },
+    trackTitles: [
+      'Badass',
+      'Naa Ready',
+      'Anbenum',
+      'Bloody Sweet',
+      'Lokiverse 2.0',
+      'Glimpse of Antony Das',
+      'Glimpse of Harold Das',
+    ],
   },
   {
     id: 'saavn-album-52210422',
@@ -53,6 +81,14 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-sushin', name: 'Sushin Shyam' },
+    trackTitles: [
+      'Illuminati',
+      'Jaada',
+      'Armadham',
+      'Galatta',
+      'Mathapithakkale',
+      'Odimaga',
+    ],
   },
   {
     id: 'saavn-album-47094777',
@@ -65,6 +101,7 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-anirudh', name: 'Anirudh Ravichander' },
+    trackTitles: ['Hukum', 'Kaavaalaa', 'Jailer Theme', 'Alappara', 'Rathamaarey'],
   },
   {
     id: 'saavn-album-51419924',
@@ -77,6 +114,7 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-sushin', name: 'Sushin Shyam' },
+    trackTitles: ['Kuthanthram', 'Thaai Manam', 'Nebulakal', 'The Gunaa Song'],
   },
   {
     id: 'saavn-album-49986024',
@@ -89,18 +127,20 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-pritam', name: 'Pritam' },
+    trackTitles: ['Arjan Vailly', 'Hua Main', 'Satranga', 'Papa Meri Jaan', 'Pehle Bhi Main'],
   },
   {
     id: 'saavn-album-35003732',
     title: 'Vikram',
     artistName: 'Anirudh Ravichander',
-    coverImage: 'https://c.saavncdn.com/732/Vikram-Tamil-2022-20220515182605-500x500.jpg',
+    coverImage: 'https://c.saavncdn.com/772/Vikram-Tamil-2022-20220515182605-500x500.jpg',
     releaseYear: 2022,
     genre: 'Tamil / Soundtrack',
     totalTracks: 6,
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-anirudh', name: 'Anirudh Ravichander' },
+    trackTitles: ['Pathala Pathala', 'Vikram Title Track', 'Wasted', 'Porkanda Singam', 'Once Upon a Time'],
   },
   {
     id: 'saavn-album-52424905',
@@ -113,6 +153,7 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-vishnu', name: 'Vishnu Vijay' },
+    trackTitles: ['Kutty Kudiye', 'Welcome to Hyderabad', 'Mini Maharani', 'Telangana Bommalu'],
   },
   {
     id: 'saavn-album-25118096',
@@ -125,8 +166,16 @@ export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
     isHiRes: false,
     isLossless: true,
     artist: { id: 'saavn-artist-weeknd', name: 'The Weeknd' },
+    trackTitles: ['Blinding Lights', 'Save Your Tears', 'Starboy', 'The Hills', 'Can\'t Feel My Face'],
   },
 ];
+
+export function cleanSongTitle(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/\s*[\(\[][^()\[\]]*(from|soundtrack|version|feat|theme|ost|original|remix|score)[^()\[\]]*[\)\]]/gi, '')
+    .trim();
+}
 
 export function levenshteinDistance(a: string, b: string): number {
   if (a.length === 0) return b.length;
@@ -182,11 +231,31 @@ export function fuzzyMatch(source: string, target: string): boolean {
 export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtrack[] {
   if (!query || query.trim().length < 2) return [];
   const q = query.trim();
+  const qNorm = q.toLowerCase().replace(/[^a-z0-9]/g, '');
+
   return FEATURED_SOUNDTRACKS.filter((st) => {
-    return (
+    // 1. Direct album title or artist match
+    if (
       fuzzyMatch(st.title, q) ||
       fuzzyMatch(st.artistName || '', q) ||
       (st.genre && fuzzyMatch(st.genre, q))
-    );
+    ) {
+      return true;
+    }
+
+    // 2. Track title match within the album
+    if (st.trackTitles) {
+      return st.trackTitles.some((trackName) => {
+        const tNorm = trackName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (
+          tNorm === qNorm ||
+          tNorm.includes(qNorm) ||
+          qNorm.includes(tNorm) ||
+          fuzzyMatch(trackName, q)
+        );
+      });
+    }
+
+    return false;
   });
 }

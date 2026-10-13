@@ -1,6 +1,6 @@
 import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult } from './types';
 import { TrackData, AlbumSummary } from '@/types/music';
-import { findMatchingFeaturedSoundtracks } from '@/lib/constants/soundtracks';
+import { findMatchingFeaturedSoundtracks, cleanSongTitle, fuzzyMatch } from '@/lib/constants/soundtracks';
 import CryptoJS from 'crypto-js';
 
 const SAAVN_API_BASE = 'https://www.jiosaavn.com/api.php';
@@ -64,12 +64,31 @@ export function getQueryVariants(q: string): string[] {
       variants.add('bethlehem kudumba unit');
     }
 
+    // Song title variants: Illey Illa / Ille Illa
+    if (lower.includes('illey illa') || lower.includes('ille illa') || lower.includes('illeyilla')) {
+      variants.add('illey illa');
+      variants.add('ille illa');
+      variants.add('bethlehem kudumba unit');
+    }
+
+    // Song title variants: Maanthrikam / Manthrikam
+    if (lower.includes('maanthrikam')) {
+      variants.add(b.replace(/maanthrikam/gi, 'manthrikam'));
+    } else if (lower.includes('manthrikam')) {
+      variants.add(b.replace(/manthrikam/gi, 'maanthrikam'));
+    }
+
     // Known Indian regional transliteration differences
     if (lower.includes('indrajalam')) {
       variants.add(b.replace(/indrajalam/gi, 'indrajaalam'));
+      variants.add('indra jaalam');
     }
     if (lower.includes('indrajaalam')) {
       variants.add(b.replace(/indrajaalam/gi, 'indrajalam'));
+      variants.add('indra jaalam');
+    }
+    if (lower.includes('indra jaalam')) {
+      variants.add(b.replace(/indra jaalam/gi, 'indrajaalam'));
     }
     if (lower.includes('avesham')) {
       variants.add(b.replace(/avesham/gi, 'aavesham'));
@@ -89,7 +108,7 @@ export function getQueryVariants(q: string): string[] {
     }
   }
 
-  return Array.from(variants).slice(0, 5);
+  return Array.from(variants).slice(0, 6);
 }
 
 export function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null {
@@ -368,49 +387,63 @@ export class IndianMusicProvider implements CatalogueProvider {
 
       if (normQ) {
         const scoredTracks = tracks.map((track) => {
-          const normTitle = normalizeSearchText(track.title);
+          const rawCleanTitle = cleanSongTitle(track.title);
+          const normCleanTitle = normalizeSearchText(rawCleanTitle);
+          const normFullTitle = normalizeSearchText(track.title);
           const normAlbum = normalizeSearchText(track.album?.title || '');
           let score = 0;
 
-          // Exact or clean title match
-          if (normTitle === normQ || (cleanNormQ && normTitle === cleanNormQ)) {
+          // 1. Exact or clean title match (e.g. searching 'illey illa' matches 'Illey Illa')
+          if (normCleanTitle === normQ || (cleanNormQ && normCleanTitle === cleanNormQ)) {
+            score += 350;
+          } else if (normCleanTitle.startsWith(normQ) || (cleanNormQ && normCleanTitle.startsWith(cleanNormQ))) {
+            score += 200;
+          } else if (normCleanTitle.includes(normQ) || (cleanNormQ && normCleanTitle.includes(cleanNormQ))) {
             score += 120;
-          } else if (normTitle.startsWith(normQ) || (cleanNormQ && normTitle.startsWith(cleanNormQ))) {
+          } else if (normFullTitle === normQ || (cleanNormQ && normFullTitle === cleanNormQ)) {
+            score += 250;
+          } else if (normFullTitle.startsWith(normQ) || (cleanNormQ && normFullTitle.startsWith(cleanNormQ))) {
+            score += 150;
+          } else if (normFullTitle.includes(normQ) || (cleanNormQ && normFullTitle.includes(cleanNormQ))) {
             score += 70;
-          } else if (normTitle.includes(normQ) || (cleanNormQ && normTitle.includes(cleanNormQ))) {
-            score += 40;
+          } else if (fuzzyMatch(rawCleanTitle, q)) {
+            score += 160;
+          } else if (fuzzyMatch(track.title, q)) {
+            score += 100;
           }
 
-          // Album match
+          // 2. Album match bonus
           if (normAlbum === normQ || (cleanNormQ && normAlbum === cleanNormQ)) {
-            score += 40;
+            score += 70;
           } else if (normAlbum.startsWith(normQ) || (cleanNormQ && normAlbum.startsWith(cleanNormQ))) {
-            score += 25;
+            score += 45;
           } else if (normAlbum.includes(normQ) || (cleanNormQ && normAlbum.includes(cleanNormQ))) {
-            score += 15;
+            score += 25;
+          } else if (fuzzyMatch(track.album?.title || '', q)) {
+            score += 40;
           }
 
-          // Artist match
+          // 3. Artist match bonus
           const artistMatch = track.artists?.some((a) => {
             const normA = normalizeSearchText(a.name);
-            return normA.includes(normQ) || normQ.includes(normA);
+            return normA.includes(normQ) || normQ.includes(normA) || fuzzyMatch(a.name, q);
           });
           if (artistMatch) {
-            score += 30;
+            score += 35;
           }
 
-          // Popularity / stream count weighting (log scale)
+          // 4. Popularity / stream count weighting (log scale)
           const plays = track.playCount || 0;
           if (plays > 0) {
             score += Math.log10(plays + 1) * 12;
           }
 
-          // Recency bonus for latest releases (e.g. 2026/2024 hits)
+          // 5. Recency bonus for latest releases (e.g. 2026/2024 hits)
           if (track.album?.releaseYear) {
             if (track.album.releaseYear >= 2026) {
-              score += 25;
+              score += 30;
             } else if (track.album.releaseYear >= 2024) {
-              score += 15;
+              score += 18;
             } else {
               score += Math.max(0, (track.album.releaseYear - 1980) * 0.1);
             }

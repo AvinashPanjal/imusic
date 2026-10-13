@@ -166,10 +166,21 @@ export const AudioEngine: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    // Helper to safely apply volume & mute across all platforms
+    const targetVol = isMuted ? 0 : Math.max(0, Math.min(1, volume));
+    try {
+      audio.volume = targetVol;
+      audio.muted = isMuted;
+    } catch {}
+
     // Fast path: if streamUrl is already known, load synchronously for instant background transitions
     if (currentTrack.streamUrl) {
       audio.src = currentTrack.streamUrl;
       audio.load();
+      try {
+        audio.volume = targetVol;
+        audio.muted = isMuted;
+      } catch {}
       updateMediaSession(currentTrack);
 
       if (isPlaying) {
@@ -200,6 +211,10 @@ export const AudioEngine: React.FC = () => {
 
       audio.src = url;
       audio.load();
+      try {
+        audio.volume = targetVol;
+        audio.muted = isMuted;
+      } catch {}
 
       updateMediaSession(currentTrack);
 
@@ -290,6 +305,10 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handlePlaying = () => {
+      try {
+        audio.volume = isMuted ? 0 : Math.max(0, Math.min(1, volume));
+        audio.muted = isMuted;
+      } catch {}
       setIsPlaying(true);
       setIsLoading(false);
       setNetworkInterrupted(false);
@@ -314,6 +333,10 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handleCanPlay = () => {
+      try {
+        audio.volume = isMuted ? 0 : Math.max(0, Math.min(1, volume));
+        audio.muted = isMuted;
+      } catch {}
       setIsLoading(false);
       setNetworkInterrupted(false);
     };

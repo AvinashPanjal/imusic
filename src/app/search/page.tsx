@@ -9,7 +9,7 @@ import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { usePlayerStore } from '@/store/playerStore';
 import { normalizeSearchText, cleanQuery } from '@/lib/providers/IndianMusicProvider';
-import { FEATURED_SOUNDTRACKS, fuzzyMatch } from '@/lib/constants/soundtracks';
+import { FEATURED_SOUNDTRACKS, fuzzyMatch, cleanSongTitle } from '@/lib/constants/soundtracks';
 import styles from './search.module.css';
 
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
@@ -85,13 +85,47 @@ export default function SearchPage() {
             return true;
           });
 
-          // Deduplicate tracks by ID
+          // Deduplicate tracks by ID and sort by query relevance
           const seenTrackIds = new Set<string>();
-          const uniqueTracks = aggregatedTracks.filter((t) => {
+          let uniqueTracks = aggregatedTracks.filter((t) => {
             if (seenTrackIds.has(t.id)) return false;
             seenTrackIds.add(t.id);
             return true;
           });
+
+          // Spotify-style client relevance sorting to guarantee exact matches are #1
+          const normQ = normalizeSearchText(debouncedQuery);
+          const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
+
+          if (normQ) {
+            uniqueTracks.sort((a, b) => {
+              const aClean = cleanSongTitle(a.title);
+              const bClean = cleanSongTitle(b.title);
+              const aNormClean = normalizeSearchText(aClean);
+              const bNormClean = normalizeSearchText(bClean);
+
+              // 1. Exact clean match has highest priority
+              const aExact = aNormClean === normQ || (cleanNormQ && aNormClean === cleanNormQ);
+              const bExact = bNormClean === normQ || (cleanNormQ && bNormClean === cleanNormQ);
+              if (aExact && !bExact) return -1;
+              if (bExact && !aExact) return 1;
+
+              // 2. Starts with query
+              const aStarts = aNormClean.startsWith(normQ) || (cleanNormQ && aNormClean.startsWith(cleanNormQ));
+              const bStarts = bNormClean.startsWith(normQ) || (cleanNormQ && bNormClean.startsWith(cleanNormQ));
+              if (aStarts && !bStarts) return -1;
+              if (bStarts && !aStarts) return 1;
+
+              // 3. Fuzzy match
+              const aFuzzy = fuzzyMatch(aClean, debouncedQuery) || fuzzyMatch(a.title, debouncedQuery);
+              const bFuzzy = fuzzyMatch(bClean, debouncedQuery) || fuzzyMatch(b.title, debouncedQuery);
+              if (aFuzzy && !bFuzzy) return -1;
+              if (bFuzzy && !aFuzzy) return 1;
+
+              // 4. Fallback to stream count
+              return (b.playCount || 0) - (a.playCount || 0);
+            });
+          }
 
           setResults({
             tracks: uniqueTracks,
@@ -145,19 +179,26 @@ export default function SearchPage() {
   const normQuery = normalizeSearchText(debouncedQuery);
   const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
   const normAlbumTitle = topAlbum ? normalizeSearchText(topAlbum.title) : '';
+  const topCleanTitle = topTrack ? cleanSongTitle(topTrack.title) : '';
+  const normTrackClean = topTrack ? normalizeSearchText(topCleanTitle) : '';
   const normTrackTitle = topTrack ? normalizeSearchText(topTrack.title) : '';
 
   const isTrackExact = Boolean(
-    normTrackTitle &&
-      (normTrackTitle === normQuery ||
+    topTrack &&
+      (normTrackClean === normQuery ||
+        (cleanNormQ && normTrackClean === cleanNormQ) ||
+        normTrackTitle === normQuery ||
         (cleanNormQ && normTrackTitle === cleanNormQ) ||
+        normTrackClean.startsWith(normQuery) ||
+        (cleanNormQ && normTrackClean.startsWith(cleanNormQ)) ||
         normTrackTitle.startsWith(normQuery) ||
         (cleanNormQ && normTrackTitle.startsWith(cleanNormQ)) ||
+        fuzzyMatch(topCleanTitle, debouncedQuery) ||
         fuzzyMatch(topTrack?.title || '', debouncedQuery))
   );
 
   const isAlbumExact = Boolean(
-    normAlbumTitle &&
+    topAlbum &&
       (normAlbumTitle === normQuery ||
         (cleanNormQ && normAlbumTitle === cleanNormQ) ||
         normAlbumTitle.startsWith(normQuery) ||
@@ -172,14 +213,14 @@ export default function SearchPage() {
   // If there is an exact or strong track match, Song ALWAYS wins Top Result (just like Spotify!)
   const isTopMatchAlbum = Boolean(
     topAlbum &&
+      !isTrackExact &&
       (isExplicitAlbumSearch ||
-        (!isTrackExact &&
-          (isAlbumExact ||
-            fuzzyMatch(topAlbum.title, debouncedQuery) ||
-            normAlbumTitle.includes(normQuery) ||
-            normQuery.includes(normAlbumTitle) ||
-            topAlbum.title.toLowerCase().includes(queryLower) ||
-            queryLower.includes(topAlbum.title.toLowerCase()))))
+        isAlbumExact ||
+        fuzzyMatch(topAlbum.title, debouncedQuery) ||
+        normAlbumTitle.includes(normQuery) ||
+        normQuery.includes(normAlbumTitle) ||
+        topAlbum.title.toLowerCase().includes(queryLower) ||
+        queryLower.includes(topAlbum.title.toLowerCase()))
   );
 
   const handlePlayTopResult = async (e: React.MouseEvent) => {

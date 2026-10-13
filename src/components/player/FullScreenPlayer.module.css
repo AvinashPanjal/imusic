@@ -294,10 +294,61 @@
   min-width: 32px;
   min-height: 32px;
   color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.volumeIconBtn:hover {
+  color: var(--text-primary);
+}
+
+.volumeIconBtn:active {
+  transform: scale(0.9);
+}
+
+.sliderContainer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  position: relative;
 }
 
 .volumeSlider {
-  flex: 1;
+  width: 100%;
+  height: 28px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.volumeSlider::-webkit-slider-runnable-track {
+  background: inherit !important;
+  height: 4px;
+  border-radius: var(--radius-full);
+}
+
+.volumeSlider::-moz-range-track {
+  background: var(--bg-surface-3);
+  height: 4px;
+  border-radius: var(--radius-full);
+}
+
+.volumeSlider::-moz-range-progress {
+  background: var(--text-primary);
+  height: 4px;
+  border-radius: var(--radius-full);
+}
+
+.volumePercentText {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
 .iosVolumeNotice {
