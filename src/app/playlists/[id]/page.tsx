@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { PlaylistData, TrackData } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { usePlayerStore } from '@/store/playerStore';
+import { LocalLibrary } from '@/lib/storage/localLibrary';
 import { Play, Shuffle, ChevronLeft, Library, Trash2 } from 'lucide-react';
 import styles from './playlistDetail.module.css';
 
@@ -20,16 +21,27 @@ export default function PlaylistDetailPage() {
   const { playTrack, toggleShuffle } = usePlayerStore();
 
   const loadPlaylist = async () => {
+    // 1. Read from local library first
+    const local = LocalLibrary.getPlaylistById(id);
+    if (local) {
+      setPlaylist(local);
+      const extractedTracks = local.tracks?.map((pt: any) => pt.track || pt) || [];
+      setTracks(extractedTracks);
+      setLoading(false);
+    }
+
     try {
       const res = await fetch(`/api/playlists/${id}`);
       if (res.ok) {
         const data = await res.json();
-        setPlaylist(data.playlist);
-        const extractedTracks = data.playlist.tracks?.map((pt: any) => pt.track) || [];
-        setTracks(extractedTracks);
+        if (data.playlist) {
+          setPlaylist(data.playlist);
+          const extractedTracks = data.playlist.tracks?.map((pt: any) => pt.track || pt) || [];
+          setTracks(extractedTracks);
+        }
       }
     } catch (err) {
-      console.error('Error loading playlist:', err);
+      console.warn('Error loading playlist from server:', err);
     } finally {
       setLoading(false);
     }
@@ -55,14 +67,9 @@ export default function PlaylistDetailPage() {
 
   const handleDeletePlaylist = async () => {
     if (!confirm('Are you sure you want to delete this playlist?')) return;
-    try {
-      const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        router.push('/library');
-      }
-    } catch (err) {
-      console.error('Failed to delete playlist:', err);
-    }
+    LocalLibrary.deletePlaylist(id);
+    fetch(`/api/playlists/${id}`, { method: 'DELETE' }).catch(() => {});
+    router.push('/library');
   };
 
   if (loading) {

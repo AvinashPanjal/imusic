@@ -8,6 +8,7 @@ import { TrackData, PlaylistData, AlbumSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
+import { LocalLibrary } from '@/lib/storage/localLibrary';
 import {
   Library as LibraryIcon,
   Heart,
@@ -65,42 +66,71 @@ export default function LibraryPage() {
   // Load Library Data
   const loadLibrary = async () => {
     try {
-      const [favRes, playRes, tracksRes, albumsRes] = await Promise.all([
-        fetch('/api/library/favorites'),
-        fetch('/api/playlists'),
-        fetch('/api/tracks'),
-        fetch('/api/albums'),
-      ]);
+      // 1. Read local storage immediately
+      const localPlaylists = LocalLibrary.getPlaylists();
+      const localFavorites = LocalLibrary.getFavorites();
 
-      if (favRes.ok) {
-        const d = await favRes.json();
-        setFavorites(d.favorites || []);
+      let serverFavs: TrackData[] = [];
+      let serverPls: PlaylistData[] = [];
+
+      try {
+        const [favRes, playRes, tracksRes, albumsRes] = await Promise.all([
+          fetch('/api/library/favorites').catch(() => null),
+          fetch('/api/playlists').catch(() => null),
+          fetch('/api/tracks').catch(() => null),
+          fetch('/api/albums').catch(() => null),
+        ]);
+
+        if (favRes && favRes.ok) {
+          const d = await favRes.json();
+          serverFavs = d.favorites || [];
+        }
+        if (playRes && playRes.ok) {
+          const d = await playRes.json();
+          serverPls = d.playlists || [];
+        }
+        if (tracksRes && tracksRes.ok) {
+          const d = await tracksRes.json();
+          setAllTracks(d.tracks || []);
+        }
+        if (albumsRes && albumsRes.ok) {
+          const d = await albumsRes.json();
+          setAlbums(d.albums || []);
+        }
+      } catch (netErr) {
+        console.warn('Network issue fetching library from server:', netErr);
       }
-      if (playRes.ok) {
-        const d = await playRes.json();
-        setPlaylists(d.playlists || []);
+
+      // Merge playlists: local first, then server
+      const combinedPls = [...localPlaylists];
+      for (const sp of serverPls) {
+        if (!combinedPls.some((p) => p.id === sp.id)) {
+          combinedPls.push(sp);
+        }
       }
-      if (tracksRes.ok) {
-        const d = await tracksRes.json();
-        setAllTracks(d.tracks || []);
+      setPlaylists(combinedPls);
+
+      // Merge favorites: local first, then server
+      const combinedFavs = [...localFavorites];
+      for (const sf of serverFavs) {
+        if (!combinedFavs.some((f) => f.id === sf.id)) {
+          combinedFavs.push(sf);
+        }
       }
-      if (albumsRes.ok) {
-        const d = await albumsRes.json();
-        setAlbums(d.albums || []);
-      }
+      setFavorites(combinedFavs);
 
       // Check offline downloads
-      const offline = await OfflineDownloadManager.getAllDownloadedTracks();
+      const offline = await OfflineDownloadManager.getAllDownloadedTracks().catch(() => []);
       setDownloadedTracks(offline);
 
       // Check storage estimate
-      const est = await OfflineDownloadManager.getStorageEstimate();
+      const est = await OfflineDownloadManager.getStorageEstimate().catch(() => ({ usedBytes: 0, quotaBytes: 0 }));
       setStorageEstimate({
         usedMB: Math.round(est.usedBytes / (1024 * 1024)),
         quotaMB: Math.round(est.quotaBytes / (1024 * 1024)),
       });
     } catch (err) {
-      console.error('Failed to load library:', err);
+      console.warn('Failed to load library:', err);
     } finally {
       setLoading(false);
     }
@@ -114,20 +144,28 @@ export default function LibraryPage() {
     e.preventDefault();
     if (!newPlaylistTitle.trim()) return;
 
-    try {
-      const res = await fetch('/api/playlists', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newPlaylistTitle.trim() }),
-      });
-      if (res.ok) {
-        setNewPlaylistTitle('');
-        setShowCreateModal(false);
-        loadLibrary();
-      }
-    } catch (err) {
-      console.error('Create playlist error:', err);
-    }
+    const title = newPlaylistTitle.trim();
+    const localPl: PlaylistData = {
+      id: `pl_local_${Date.now()}`,
+      title,
+      description: 'Created by you',
+      isPublic: false,
+      userId: 'local_user',
+      createdAt: new Date().toISOString(),
+      trackCount: 0,
+      tracks: [],
+    };
+
+    LocalLibrary.savePlaylist(localPl);
+    setPlaylists((prev) => [localPl, ...prev.filter((p) => p.id !== localPl.id)]);
+    setNewPlaylistTitle('');
+    setShowCreateModal(false);
+
+    fetch('/api/playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }).catch(() => {});
   };
 
   const handleImportPlaylist = async (e: React.FormEvent) => {
@@ -135,7 +173,7 @@ export default function LibraryPage() {
     if (!importUrl.trim() || isImporting) return;
 
     setIsImporting(true);
-    setImportStatusText('Contacting Spotify & parsing tracklist...');
+    setImportStatusText('Fetching Spotify tracks & matching 320 KBPS audio streams...');
     setImportResult(null);
 
     try {
@@ -149,15 +187,16 @@ export default function LibraryPage() {
       });
 
       const data = await res.json();
-      if (res.ok && data.success) {
+      if (res.ok && data.success && data.playlist) {
+        LocalLibrary.savePlaylist(data.playlist);
+        setPlaylists((prev) => [data.playlist, ...prev.filter((p) => p.id !== data.playlist.id)]);
         setImportResult(data);
         setImportUrl('');
         setImportCustomTitle('');
-        loadLibrary();
       } else {
         setImportResult({
           success: false,
-          error: data.error || 'Failed to import playlist. Please check link.',
+          error: data.error || 'Failed to import playlist. Please check link and ensure it is public.',
         });
       }
     } catch (err: any) {
@@ -177,18 +216,12 @@ export default function LibraryPage() {
 
     if (!confirm(`Are you sure you want to delete "${playlistTitle}"?`)) return;
 
-    try {
-      const res = await fetch(`/api/playlists/${playlistId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
-      } else {
-        alert('Could not delete playlist. Please try again.');
-      }
-    } catch (err) {
-      console.error('Delete playlist error:', err);
-    }
+    LocalLibrary.deletePlaylist(playlistId);
+    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+
+    fetch(`/api/playlists/${playlistId}`, {
+      method: 'DELETE',
+    }).catch(() => {});
   };
 
   // Sort helper
@@ -356,7 +389,7 @@ export default function LibraryPage() {
                     <div className={styles.playlistMeta}>
                       <span className={styles.playlistTitle}>{pl.title}</span>
                       <span className={styles.playlistSubtitle}>
-                        {pl.trackCount} {pl.trackCount === 1 ? 'song' : 'songs'}
+                        {(pl.trackCount ?? pl.tracks?.length ?? 0)} {(pl.trackCount === 1 || pl.tracks?.length === 1) ? 'song' : 'songs'}
                         {pl.description ? ` • ${pl.description}` : ''}
                       </span>
                     </div>

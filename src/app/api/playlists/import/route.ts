@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptMediaUrl, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
+import { TrackData, PlaylistData } from '@/types/music';
 import { z } from 'zod';
 
 const ImportPlaylistSchema = z.object({
@@ -24,7 +25,19 @@ interface ParsedPlaylist {
 }
 
 // 1. Fetch & Parse Spotify Playlist or Album
-async function fetchSpotifyPlaylist(url: string): Promise<ParsedPlaylist | null> {
+async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | null> {
+  let url = rawUrl;
+
+  // Resolve short links like spotify.link/...
+  if (url.includes('spotify.link/') || url.includes('spotify.app.link/')) {
+    try {
+      const headRes = await fetch(url, { redirect: 'follow' });
+      url = headRes.url || url;
+    } catch {
+      // ignore
+    }
+  }
+
   const match = url.match(/(?:playlist|album)[\/:]([a-zA-Z0-9]+)/);
   if (!match) return null;
   const id = match[1];
@@ -41,38 +54,59 @@ async function fetchSpotifyPlaylist(url: string): Promise<ParsedPlaylist | null>
       },
     });
 
-    if (!res.ok) return null;
-    const html = await res.text();
-    const scriptMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-    if (!scriptMatch) return null;
+    if (res.ok) {
+      const html = await res.text();
+      const scriptMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+      if (scriptMatch) {
+        const data = JSON.parse(scriptMatch[1]);
+        const entity = data.props?.pageProps?.state?.data?.entity;
+        if (entity && Array.isArray(entity.trackList) && entity.trackList.length > 0) {
+          const playlistName = entity.name || (isAlbum ? 'Imported Spotify Album' : 'Imported Spotify Playlist');
+          const description = entity.subtitle ? `Curated by ${entity.subtitle} on Spotify` : 'Imported from Spotify';
+          const coverImage = entity.coverArt?.sources?.[0]?.url || null;
 
-    const data = JSON.parse(scriptMatch[1]);
-    const entity = data.props?.pageProps?.state?.data?.entity;
-    if (!entity) return null;
+          const rawTracks = entity.trackList as any[];
+          const tracks: ParsedTrack[] = rawTracks.map((t) => ({
+            title: t.title || t.name || 'Unknown Track',
+            artist: t.subtitle || t.artists?.[0]?.name || 'Unknown Artist',
+            duration: t.duration ? Math.round(t.duration / 1000) : 180,
+            previewUrl: t.audioPreview?.url || null,
+            coverImage,
+          }));
 
-    const playlistName = entity.name || (isAlbum ? 'Imported Spotify Album' : 'Imported Spotify Playlist');
-    const description = entity.subtitle ? `Curated by ${entity.subtitle} on Spotify` : 'Imported from Spotify';
-    const coverImage = entity.coverArt?.sources?.[0]?.url || null;
-
-    const rawTracks = (entity.trackList || []) as any[];
-    const tracks: ParsedTrack[] = rawTracks.map((t) => ({
-      title: t.title || t.name || 'Unknown Track',
-      artist: t.subtitle || t.artists?.[0]?.name || 'Unknown Artist',
-      duration: t.duration ? Math.round(t.duration / 1000) : 180,
-      previewUrl: t.audioPreview?.url || null,
-      coverImage,
-    }));
-
-    return {
-      title: playlistName,
-      description,
-      coverImage,
-      tracks,
-    };
+          return {
+            title: playlistName,
+            description,
+            coverImage,
+            tracks,
+          };
+        }
+      }
+    }
   } catch (err) {
-    console.error('Error scraping Spotify playlist:', err);
-    return null;
+    console.warn('Error scraping Spotify playlist embed:', err);
   }
+
+  // Fallback: Check oEmbed for playlist title and cover
+  try {
+    const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(`https://open.spotify.com/${embedType}/${id}`)}`;
+    const oRes = await fetch(oembedUrl);
+    if (oRes.ok) {
+      const oData = await oRes.json();
+      if (oData && oData.title) {
+        return {
+          title: oData.title,
+          description: 'Imported from Spotify',
+          coverImage: oData.thumbnail_url || null,
+          tracks: [],
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
 }
 
 // 2. Fetch & Parse JioSaavn Playlist or Album
@@ -109,7 +143,7 @@ async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null
       tracks,
     };
   } catch (err) {
-    console.error('Error parsing JioSaavn playlist:', err);
+    console.warn('Error parsing JioSaavn playlist:', err);
     return null;
   }
 }
@@ -124,7 +158,6 @@ function parseRawTracklist(text: string): ParsedPlaylist {
   const tracks: ParsedTrack[] = [];
 
   for (const line of lines) {
-    // Remove leading numbering like "1. ", "01 - "
     const cleaned = line.replace(/^\d+[\.\-\s)]+/, '').trim();
     if (!cleaned) continue;
 
@@ -175,7 +208,7 @@ async function matchPlayableStream(title: string, artist: string) {
         const top = results[0];
         let streamUrl = decryptMediaUrl(top.encrypted_media_url);
         if (streamUrl) {
-          // Upgrade to 320 KBPS
+          // Upgrade to 320 KBPS AAC
           streamUrl = streamUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
         }
         return {
@@ -210,7 +243,7 @@ export async function POST(request: NextRequest) {
 
     let parsedPlaylist: ParsedPlaylist | null = null;
 
-    if (url.includes('spotify.com') || url.startsWith('spotify:')) {
+    if (url.includes('spotify.com') || url.includes('spotify.link') || url.startsWith('spotify:')) {
       parsedPlaylist = await fetchSpotifyPlaylist(url);
     } else if (url.includes('jiosaavn.com')) {
       parsedPlaylist = await fetchJioSaavnPlaylist(url);
@@ -218,45 +251,30 @@ export async function POST(request: NextRequest) {
 
     // Fallback: plain text list of songs
     if (!parsedPlaylist || parsedPlaylist.tracks.length === 0) {
-      parsedPlaylist = parseRawTracklist(url);
+      // Only parse as plain text if it looks like a track list and not a broken URL
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        parsedPlaylist = parseRawTracklist(url);
+      }
     }
 
     if (!parsedPlaylist || parsedPlaylist.tracks.length === 0) {
       return NextResponse.json(
-        { error: 'Could not extract any songs from this playlist link. Please verify the URL or paste song titles.' },
-        { status: 422 }
+        {
+          error:
+            'Could not extract songs from this Spotify link. Please ensure the playlist is Public (not Private) in Spotify, or paste the song titles directly.',
+        },
+        { status: 400 }
       );
     }
 
-    // Default user
-    let user = await prisma.user.findFirst();
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email: 'listener@imusic.local',
-          name: 'Audiophile',
-          role: 'user',
-        },
-      });
-    }
-
     const finalTitle = customTitle?.trim() || parsedPlaylist.title;
-
-    // Create the playlist in DB
-    const playlist = await prisma.playlist.create({
-      data: {
-        title: finalTitle,
-        description: parsedPlaylist.description || `Imported playlist (${parsedPlaylist.tracks.length} tracks)`,
-        coverImage: parsedPlaylist.coverImage,
-        userId: user.id,
-      },
-    });
-
-    let matchedCount = 0;
+    const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let playlistFirstCover: string | null = parsedPlaylist.coverImage || null;
+    let matchedCount = 0;
 
-    // Process & match tracks up to 50 tracks to keep request responsive
+    // Process up to 50 tracks
     const tracksToProcess = parsedPlaylist.tracks.slice(0, 50);
+    const fullTracks: TrackData[] = [];
 
     for (let i = 0; i < tracksToProcess.length; i++) {
       const item = tracksToProcess[i];
@@ -274,108 +292,178 @@ export async function POST(request: NextRequest) {
           playlistFirstCover = coverImage;
         }
 
-        // Upsert Artist
-        let artist = await prisma.artist.findFirst({
-          where: { name: artistName },
-        });
-        if (!artist) {
-          artist = await prisma.artist.create({
-            data: { name: artistName, image: coverImage },
-          });
-        }
-
-        // Upsert Album
-        let album = await prisma.album.findFirst({
-          where: { title: albumName, artistId: artist.id },
-        });
-        if (!album) {
-          album = await prisma.album.create({
-            data: {
-              title: albumName,
-              artistId: artist.id,
-              coverImage,
-              releaseYear: match?.year || new Date().getFullYear(),
-              isLossless: true,
-            },
-          });
-        }
-
-        // Upsert Track
-        let track = await prisma.track.findFirst({
-          where: { title: trackTitle, albumId: album.id },
-        });
-
-        if (!track) {
-          track = await prisma.track.create({
-            data: {
-              title: trackTitle,
-              albumId: album.id,
-              duration,
-              genre: match?.genre || 'Soundtrack',
-              trackNumber: i + 1,
-              artists: {
-                create: {
-                  artistId: artist.id,
-                  role: 'primary',
-                },
-              },
-              assets: streamUrl
-                ? {
-                    create: {
-                      format: 'mp4',
-                      codec: 'AAC',
-                      bitDepth: 16,
-                      sampleRate: 44100,
-                      bitrate: 320,
-                      isLossless: true,
-                      isHiRes: false,
-                      storageType: 'remote_stream',
-                      storageKey: streamUrl,
-                      duration,
-                    },
-                  }
-                : undefined,
-            },
-          });
-        }
-
         if (streamUrl) matchedCount++;
 
-        // Connect track to playlist
-        await prisma.playlistTrack.create({
-          data: {
-            playlistId: playlist.id,
-            trackId: track.id,
-            position: i + 1,
+        const trackId = `track_${Date.now()}_${i}`;
+        const trackObj: TrackData = {
+          id: trackId,
+          title: trackTitle,
+          duration,
+          trackNumber: i + 1,
+          genre: match?.genre || 'Soundtrack',
+          artists: [{ id: `art_${i}`, name: artistName, image: coverImage }],
+          album: {
+            id: `alb_${i}`,
+            title: albumName,
+            coverImage,
+            releaseYear: match?.year || new Date().getFullYear(),
+            isLossless: true,
           },
-        });
+          assets: streamUrl
+            ? [
+                {
+                  id: `asset_${i}`,
+                  trackId,
+                  format: 'mp4',
+                  codec: 'AAC',
+                  bitrate: 320,
+                  isLossless: true,
+                  isHiRes: false,
+                  storageType: 'remote_stream',
+                  storageKey: streamUrl,
+                  duration,
+                },
+              ]
+            : [],
+          streamUrl: streamUrl || undefined,
+        };
+
+        fullTracks.push(trackObj);
       } catch (trackErr) {
-        console.warn(`Error importing track ${item.title}:`, trackErr);
+        console.warn(`Error processing track ${item.title}:`, trackErr);
       }
     }
 
-    // If playlist cover wasn't set originally, set from first matched cover
-    if (playlistFirstCover && !playlist.coverImage) {
-      await prisma.playlist.update({
-        where: { id: playlist.id },
-        data: { coverImage: playlistFirstCover },
+    const playlistResponse: PlaylistData = {
+      id: playlistId,
+      title: finalTitle,
+      description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
+      coverImage: playlistFirstCover || parsedPlaylist.coverImage || null,
+      isPublic: false,
+      userId: 'local_user',
+      createdAt: new Date().toISOString(),
+      trackCount: fullTracks.length,
+      tracks: fullTracks.map((t, idx) => ({
+        position: idx + 1,
+        track: t,
+      })),
+    };
+
+    // Safely attempt to persist to Prisma if DB is available (never throws 500 if DB is down)
+    try {
+      let user = await prisma.user.findFirst();
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            email: 'listener@imusic.local',
+            name: 'Audiophile',
+            role: 'user',
+          },
+        });
+      }
+
+      const dbPlaylist = await prisma.playlist.create({
+        data: {
+          title: finalTitle,
+          description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
+          coverImage: playlistResponse.coverImage,
+          userId: user.id,
+        },
       });
+
+      playlistResponse.id = dbPlaylist.id;
+
+      // Upsert tracks in DB
+      for (let i = 0; i < fullTracks.length; i++) {
+        const t = fullTracks[i];
+        try {
+          const artistName = t.artists[0]?.name || 'Unknown Artist';
+          let artist = await prisma.artist.findFirst({ where: { name: artistName } });
+          if (!artist) {
+            artist = await prisma.artist.create({
+              data: { name: artistName, image: t.album?.coverImage },
+            });
+          }
+
+          const albumName = t.album?.title || `${t.title} - Single`;
+          let album = await prisma.album.findFirst({ where: { title: albumName, artistId: artist.id } });
+          if (!album) {
+            album = await prisma.album.create({
+              data: {
+                title: albumName,
+                artistId: artist.id,
+                coverImage: t.album?.coverImage,
+                releaseYear: t.album?.releaseYear || new Date().getFullYear(),
+                isLossless: true,
+              },
+            });
+          }
+
+          let dbTrack = await prisma.track.findFirst({
+            where: { title: t.title, albumId: album.id },
+          });
+
+          if (!dbTrack) {
+            dbTrack = await prisma.track.create({
+              data: {
+                title: t.title,
+                albumId: album.id,
+                duration: t.duration,
+                genre: t.genre || 'Soundtrack',
+                trackNumber: i + 1,
+                artists: {
+                  create: {
+                    artistId: artist.id,
+                    role: 'primary',
+                  },
+                },
+                assets: t.streamUrl
+                  ? {
+                      create: {
+                        format: 'mp4',
+                        codec: 'AAC',
+                        bitDepth: 16,
+                        sampleRate: 44100,
+                        bitrate: 320,
+                        isLossless: true,
+                        isHiRes: false,
+                        storageType: 'remote_stream',
+                        storageKey: t.streamUrl,
+                        duration: t.duration,
+                      },
+                    }
+                  : undefined,
+              },
+            });
+          }
+
+          await prisma.playlistTrack.create({
+            data: {
+              playlistId: dbPlaylist.id,
+              trackId: dbTrack.id,
+              position: i + 1,
+            },
+          });
+        } catch (dbTrackErr) {
+          console.warn(`Could not persist track ${t.title} to DB:`, dbTrackErr);
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Prisma DB not available on this host; playlist will be stored in client LocalLibrary:', dbErr);
     }
 
     return NextResponse.json({
       success: true,
-      playlist: {
-        id: playlist.id,
-        title: playlist.title,
-        trackCount: tracksToProcess.length,
-        coverImage: playlistFirstCover || playlist.coverImage,
-      },
+      playlist: playlistResponse,
       totalRequested: parsedPlaylist.tracks.length,
-      importedCount: tracksToProcess.length,
+      importedCount: fullTracks.length,
       matchedCount,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error importing playlist:', error);
-    return NextResponse.json({ error: 'Failed to import playlist' }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || 'Failed to import playlist. Please check link and try again.' },
+      { status: 400 }
+    );
   }
 }

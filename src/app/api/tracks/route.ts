@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ tracks: formatted });
   } catch (error) {
-    console.error('Error fetching tracks:', error);
-    return NextResponse.json({ error: 'Failed to fetch tracks' }, { status: 500 });
+    console.warn('Error fetching tracks, returning empty array:', error);
+    return NextResponse.json({ tracks: [] });
   }
 }

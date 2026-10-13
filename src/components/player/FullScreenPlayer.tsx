@@ -23,6 +23,7 @@ import {
   Music2,
 } from 'lucide-react';
 import { extractAmbientColors, getFallbackPalette, type AmbientPalette } from '@/lib/colorExtractor';
+import { LocalLibrary } from '@/lib/storage/localLibrary';
 import styles from './FullScreenPlayer.module.css';
 
 export const FullScreenPlayer: React.FC = () => {
@@ -91,7 +92,7 @@ export const FullScreenPlayer: React.FC = () => {
   // Sync favorite state
   useEffect(() => {
     if (currentTrack) {
-      setIsFav(Boolean(currentTrack.isFavorite));
+      setIsFav(Boolean(currentTrack.isFavorite || LocalLibrary.isFavorite(currentTrack.id)));
     }
   }, [currentTrack]);
 
@@ -132,22 +133,22 @@ export const FullScreenPlayer: React.FC = () => {
   const handleFavoriteToggle = async () => {
     const nextState = !isFav;
     setIsFav(nextState);
+    LocalLibrary.toggleFavorite(currentTrack);
 
     try {
       if (nextState) {
-        await fetch('/api/library/favorites', {
+        fetch('/api/library/favorites', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ trackId: currentTrack.id }),
-        });
+        }).catch(() => {});
       } else {
-        await fetch(`/api/library/favorites/${currentTrack.id}`, {
+        fetch(`/api/library/favorites/${currentTrack.id}`, {
           method: 'DELETE',
-        });
+        }).catch(() => {});
       }
     } catch (err) {
-      console.warn('Failed to update favorite', err);
-      setIsFav(!nextState);
+      console.warn('Failed to update favorite on server', err);
     }
   };
 

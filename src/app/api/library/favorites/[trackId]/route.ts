@@ -22,7 +22,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error removing favorite:', error);
-    return NextResponse.json({ error: 'Failed to remove favorite' }, { status: 500 });
+    console.warn('Error removing favorite from DB:', error);
+    return NextResponse.json({ success: true });
   }
 }
