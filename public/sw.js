@@ -1,4 +1,4 @@
-const CACHE_NAME = 'imusic-shell-v9';
+const CACHE_NAME = 'imusic-shell-v10';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

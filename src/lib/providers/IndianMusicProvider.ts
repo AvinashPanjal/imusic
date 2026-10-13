@@ -29,39 +29,55 @@ export function normalizeSearchText(str: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+export function cleanQuery(q: string): string {
+  if (!q) return '';
+  return q
+    .replace(/\b(songs?|movie|soundtrack|film|full|audio|video|mp3|lyrics|track|bgm)\b/gi, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 export function getQueryVariants(q: string): string[] {
   const trimmed = q.trim();
+  const cleaned = cleanQuery(trimmed);
   const variants = new Set<string>([trimmed]);
-  const lower = trimmed.toLowerCase();
-
-  // Known Indian regional transliteration differences
-  if (lower.includes('indrajalam')) {
-    variants.add(trimmed.replace(/indrajalam/gi, 'indrajaalam'));
-  }
-  if (lower.includes('indrajaalam')) {
-    variants.add(trimmed.replace(/indrajaalam/gi, 'indrajalam'));
-  }
-  if (lower.includes('avesham')) {
-    variants.add(trimmed.replace(/avesham/gi, 'aavesham'));
-  }
-  if (lower.includes('aavesham')) {
-    variants.add(trimmed.replace(/aavesham/gi, 'avesham'));
-  }
-  if (lower.includes('kudumba')) {
-    variants.add(trimmed.replace(/kudumba/gi, 'kudumbam'));
-  }
-  if (lower.includes('kudumbam')) {
-    variants.add(trimmed.replace(/kudumbam/gi, 'kudumba'));
+  if (cleaned && cleaned.length >= 2 && cleaned.toLowerCase() !== trimmed.toLowerCase()) {
+    variants.add(cleaned);
   }
 
-  // Broad double 'a' phonetic expansion (e.g., indrajalam <-> indrajaalam)
-  if (lower.includes('aa')) {
-    variants.add(trimmed.replace(/aa/gi, 'a'));
-  } else if (/a[b-z]a/i.test(trimmed)) {
-    variants.add(trimmed.replace(/a/i, 'aa'));
+  const bases = Array.from(variants);
+  for (const b of bases) {
+    const lower = b.toLowerCase();
+
+    // Known Indian regional transliteration differences
+    if (lower.includes('indrajalam')) {
+      variants.add(b.replace(/indrajalam/gi, 'indrajaalam'));
+    }
+    if (lower.includes('indrajaalam')) {
+      variants.add(b.replace(/indrajaalam/gi, 'indrajalam'));
+    }
+    if (lower.includes('avesham')) {
+      variants.add(b.replace(/avesham/gi, 'aavesham'));
+    }
+    if (lower.includes('aavesham')) {
+      variants.add(b.replace(/aavesham/gi, 'avesham'));
+    }
+    if (lower.includes('kudumba')) {
+      variants.add(b.replace(/kudumba/gi, 'kudumbam'));
+    }
+    if (lower.includes('kudumbam')) {
+      variants.add(b.replace(/kudumbam/gi, 'kudumba'));
+    }
+
+    // Broad double 'a' phonetic expansion (e.g., indrajalam <-> indrajaalam)
+    if (lower.includes('aa')) {
+      variants.add(b.replace(/aa/gi, 'a'));
+    } else if (/a[b-z]a/i.test(b)) {
+      variants.add(b.replace(/a/i, 'aa'));
+    }
   }
 
-  return Array.from(variants).slice(0, 3);
+  return Array.from(variants).slice(0, 5);
 }
 
 export function decryptMediaUrl(encryptedUrl: string | undefined | null): string | null {
@@ -126,11 +142,11 @@ export class IndianMusicProvider implements CatalogueProvider {
 
       // Fetch songs, albums, and autocomplete across query variants in parallel
       const searchPromises = queriesToRun.map(async (searchQuery) => {
-        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=18&q=${encodeURIComponent(
+        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=35&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=12&q=${encodeURIComponent(
+        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=20&q=${encodeURIComponent(
           searchQuery
         )}`;
 
@@ -259,12 +275,14 @@ export class IndianMusicProvider implements CatalogueProvider {
 
         const year = parseInt(item.year, 10) || new Date().getFullYear();
         const duration = parseInt(item.duration, 10) || 210;
+        const playCount = parseInt(item.play_count, 10) || 0;
 
         tracks.push({
           id: `saavn-${item.id}`,
           title,
           duration,
           genre: `${item.language ? item.language.toUpperCase() : 'GLOBAL'} / Soundtrack`,
+          playCount,
           album: {
             id: `saavn-album-${item.albumid || item.id}`,
             title: albumName,
@@ -300,23 +318,56 @@ export class IndianMusicProvider implements CatalogueProvider {
 
       // Score and rank tracks with Spotify-grade relevance
       const normQ = normalizeSearchText(q);
+      const cleanNormQ = normalizeSearchText(cleanQuery(q));
+
       if (normQ) {
         const scoredTracks = tracks.map((track) => {
           const normTitle = normalizeSearchText(track.title);
           const normAlbum = normalizeSearchText(track.album?.title || '');
           let score = 0;
 
-          if (normTitle === normQ) score += 120;
-          else if (normTitle.startsWith(normQ)) score += 70;
-          else if (normTitle.includes(normQ)) score += 40;
+          // Exact or clean title match
+          if (normTitle === normQ || (cleanNormQ && normTitle === cleanNormQ)) {
+            score += 120;
+          } else if (normTitle.startsWith(normQ) || (cleanNormQ && normTitle.startsWith(cleanNormQ))) {
+            score += 70;
+          } else if (normTitle.includes(normQ) || (cleanNormQ && normTitle.includes(cleanNormQ))) {
+            score += 40;
+          }
 
-          if (normAlbum === normQ) score += 50;
-          else if (normAlbum.startsWith(normQ)) score += 30;
-          else if (normAlbum.includes(normQ)) score += 15;
+          // Album match
+          if (normAlbum === normQ || (cleanNormQ && normAlbum === cleanNormQ)) {
+            score += 40;
+          } else if (normAlbum.startsWith(normQ) || (cleanNormQ && normAlbum.startsWith(cleanNormQ))) {
+            score += 25;
+          } else if (normAlbum.includes(normQ) || (cleanNormQ && normAlbum.includes(cleanNormQ))) {
+            score += 15;
+          }
 
-          // Tiebreaker bonus for recent releases
+          // Artist match
+          const artistMatch = track.artists?.some((a) => {
+            const normA = normalizeSearchText(a.name);
+            return normA.includes(normQ) || normQ.includes(normA);
+          });
+          if (artistMatch) {
+            score += 30;
+          }
+
+          // Popularity / stream count weighting (log scale)
+          const plays = track.playCount || 0;
+          if (plays > 0) {
+            score += Math.log10(plays + 1) * 12;
+          }
+
+          // Recency bonus for latest releases (e.g. 2026/2024 hits)
           if (track.album?.releaseYear) {
-            score += Math.max(0, (track.album.releaseYear - 1980) * 0.2);
+            if (track.album.releaseYear >= 2026) {
+              score += 25;
+            } else if (track.album.releaseYear >= 2024) {
+              score += 15;
+            } else {
+              score += Math.max(0, (track.album.releaseYear - 1980) * 0.1);
+            }
           }
 
           return { track, score };
@@ -357,9 +408,18 @@ export class IndianMusicProvider implements CatalogueProvider {
           const normTitle = normalizeSearchText(album.title);
           let score = 0;
 
-          if (normTitle === normQ) score += 120;
-          else if (normTitle.startsWith(normQ)) score += 70;
-          else if (normTitle.includes(normQ)) score += 40;
+          if (normTitle === normQ || (cleanNormQ && normTitle === cleanNormQ)) {
+            score += 120;
+          } else if (normTitle.startsWith(normQ) || (cleanNormQ && normTitle.startsWith(cleanNormQ))) {
+            score += 70;
+          } else if (normTitle.includes(normQ) || (cleanNormQ && normTitle.includes(cleanNormQ))) {
+            score += 40;
+          }
+
+          if (album.releaseYear) {
+            if (album.releaseYear >= 2026) score += 20;
+            else if (album.releaseYear >= 2024) score += 10;
+          }
 
           return { album, score };
         });

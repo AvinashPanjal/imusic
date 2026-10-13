@@ -8,7 +8,7 @@ import { TrackData, AlbumSummary, ArtistSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { usePlayerStore } from '@/store/playerStore';
-import { normalizeSearchText } from '@/lib/providers/IndianMusicProvider';
+import { normalizeSearchText, cleanQuery } from '@/lib/providers/IndianMusicProvider';
 import styles from './search.module.css';
 
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
@@ -220,30 +220,45 @@ export default function SearchPage() {
     setDebouncedQuery(query.trim());
   };
 
-  // Top Result determination (Spotify style with phonetic normalization)
+  // Top Result determination (Spotify style with phonetic normalization & cleanQuery)
   const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
   const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
 
   const normQuery = normalizeSearchText(debouncedQuery);
+  const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
   const normAlbumTitle = topAlbum ? normalizeSearchText(topAlbum.title) : '';
   const normTrackTitle = topTrack ? normalizeSearchText(topTrack.title) : '';
 
-  const isAlbumExact = Boolean(
-    normAlbumTitle && (normAlbumTitle === normQuery || normAlbumTitle.startsWith(normQuery))
-  );
   const isTrackExact = Boolean(
-    normTrackTitle && (normTrackTitle === normQuery || normTrackTitle.startsWith(normQuery))
+    normTrackTitle &&
+      (normTrackTitle === normQuery ||
+        (cleanNormQ && normTrackTitle === cleanNormQ) ||
+        normTrackTitle.startsWith(normQuery) ||
+        (cleanNormQ && normTrackTitle.startsWith(cleanNormQ)))
   );
 
-  // Decide whether top match is an album or track
+  const isAlbumExact = Boolean(
+    normAlbumTitle &&
+      (normAlbumTitle === normQuery ||
+        (cleanNormQ && normAlbumTitle === cleanNormQ) ||
+        normAlbumTitle.startsWith(normQuery) ||
+        (cleanNormQ && normAlbumTitle.startsWith(cleanNormQ)))
+  );
+
+  // Check if query explicitly asks for a soundtrack, album, or movie
+  const queryLower = debouncedQuery.toLowerCase();
+  const isExplicitAlbumSearch = /\b(soundtrack|album|movie|film|playlist|ost)\b/.test(queryLower);
+
+  // If there is an exact or strong track match, Song ALWAYS wins Top Result (just like Spotify!)
   const isTopMatchAlbum = Boolean(
     topAlbum &&
-      (isAlbumExact ||
+      (isExplicitAlbumSearch ||
         (!isTrackExact &&
-          (normAlbumTitle.includes(normQuery) ||
+          (isAlbumExact ||
+            normAlbumTitle.includes(normQuery) ||
             normQuery.includes(normAlbumTitle) ||
-            topAlbum.title.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-            debouncedQuery.toLowerCase().includes(topAlbum.title.toLowerCase()))))
+            topAlbum.title.toLowerCase().includes(queryLower) ||
+            queryLower.includes(topAlbum.title.toLowerCase()))))
   );
 
   const handlePlayTopResult = async (e: React.MouseEvent) => {
@@ -254,7 +269,18 @@ export default function SearchPage() {
         if (res.ok) {
           const data = await res.json();
           if (data.album?.tracks?.length > 0) {
-            playTrack(data.album.tracks[0], data.album.tracks, 0);
+            // Find track in album that matches the search query
+            const matchingTrackIdx = data.album.tracks.findIndex((t: TrackData) => {
+              const tNorm = normalizeSearchText(t.title);
+              return (
+                tNorm === normQuery ||
+                (cleanNormQ && tNorm === cleanNormQ) ||
+                tNorm.includes(normQuery) ||
+                normQuery.includes(tNorm)
+              );
+            });
+            const playIdx = matchingTrackIdx >= 0 ? matchingTrackIdx : 0;
+            playTrack(data.album.tracks[playIdx], data.album.tracks, playIdx);
             return;
           }
         }
@@ -461,7 +487,38 @@ export default function SearchPage() {
             </section>
           )}
 
-          {/* 1. MOVIE SOUNDTRACKS & PLAYLISTS */}
+          {/* 1. SONGS (DIRECTLY UNDER TOP RESULT FOR INSTANT PLAYBACK) */}
+          {(activeTab === 'all' || activeTab === 'songs') && results.tracks.length > 0 && (
+            <section className={styles.section}>
+              <div className={styles.sectionTitleRow}>
+                <Music2 size={20} className={styles.sectionIcon} />
+                <h2 className={styles.sectionTitle}>
+                  {activeTab === 'all' ? 'Songs' : `Songs (${results.tracks.length})`}
+                </h2>
+              </div>
+              <div className={styles.trackList}>
+                {(activeTab === 'all' ? results.tracks.slice(0, 5) : results.tracks).map((track, idx) => (
+                  <TrackListItem
+                    key={`${track.id}-${idx}`}
+                    track={track}
+                    index={idx}
+                    playlistContext={results.tracks}
+                  />
+                ))}
+              </div>
+              {activeTab === 'all' && results.tracks.length > 5 && (
+                <button
+                  type="button"
+                  className={styles.seeAllBtn}
+                  onClick={() => setActiveTab('songs')}
+                >
+                  See all {results.tracks.length} songs →
+                </button>
+              )}
+            </section>
+          )}
+
+          {/* 2. MOVIE SOUNDTRACKS & PLAYLISTS */}
           {(activeTab === 'all' || activeTab === 'movies') && results.albums.length > 0 && (
             <section className={styles.section}>
               <div className={styles.sectionTitleRow}>
@@ -484,26 +541,6 @@ export default function SearchPage() {
                   ))}
                 </div>
               )}
-            </section>
-          )}
-
-          {/* 2. SONGS */}
-          {(activeTab === 'all' || activeTab === 'songs') && results.tracks.length > 0 && (
-            <section className={styles.section}>
-              <div className={styles.sectionTitleRow}>
-                <Music2 size={20} className={styles.sectionIcon} />
-                <h2 className={styles.sectionTitle}>Songs ({results.tracks.length})</h2>
-              </div>
-              <div className={styles.trackList}>
-                {results.tracks.map((track, idx) => (
-                  <TrackListItem
-                    key={`${track.id}-${idx}`}
-                    track={track}
-                    index={idx}
-                    playlistContext={results.tracks}
-                  />
-                ))}
-              </div>
             </section>
           )}
 

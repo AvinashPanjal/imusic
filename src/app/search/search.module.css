@@ -320,6 +320,25 @@
   gap: 4px;
 }
 
+.seeAllBtn {
+  align-self: flex-start;
+  padding: 6px 16px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-hover);
+  cursor: pointer;
+  margin-top: 6px;
+  transition: all var(--transition-fast);
+}
+
+.seeAllBtn:hover {
+  background: var(--bg-surface-3);
+  border-color: var(--border-focus);
+}
+
 .albumsGrid {
   display: flex;
   gap: 14px;
