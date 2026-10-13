@@ -7,6 +7,7 @@ import { MiniPlayer } from '@/components/player/MiniPlayer';
 import { FullScreenPlayer } from '@/components/player/FullScreenPlayer';
 import { BottomNavigation } from '@/components/navigation/BottomNavigation';
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar';
+import { getStoredTheme, applyTheme } from '@/lib/theme';
 import styles from './AppShell.module.css';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -14,6 +15,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
   useEffect(() => {
     hydrate();
+    applyTheme(getStoredTheme());
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then((reg) => {
         reg.update().catch(() => {});

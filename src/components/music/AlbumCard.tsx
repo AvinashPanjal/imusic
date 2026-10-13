@@ -4,7 +4,8 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { AlbumSummary } from '@/types/music';
-import { Sparkles, Disc } from 'lucide-react';
+import { Sparkles, Play } from 'lucide-react';
+import { extractAmbientColors } from '@/lib/colorExtractor';
 import styles from './AlbumCard.module.css';
 
 interface AlbumCardProps {
@@ -13,13 +14,29 @@ interface AlbumCardProps {
 
 export const AlbumCard: React.FC<AlbumCardProps> = ({ album }) => {
   const [imgSrc, setImgSrc] = React.useState(album.coverImage || '/icons/default-artwork.png');
+  const [glowColor, setGlowColor] = React.useState('rgba(124, 58, 237, 0.35)');
 
   React.useEffect(() => {
     setImgSrc(album.coverImage || '/icons/default-artwork.png');
   }, [album.coverImage]);
 
+  React.useEffect(() => {
+    let active = true;
+    extractAmbientColors(imgSrc, album.title).then((p) => {
+      if (active) setGlowColor(p.glow1);
+    });
+    return () => {
+      active = false;
+    };
+  }, [imgSrc, album.title]);
+
   return (
-    <Link href={`/albums/${album.id}`} className={styles.card} aria-label={`View album ${album.title}`}>
+    <Link
+      href={`/albums/${album.id}`}
+      className={styles.card}
+      aria-label={`View album ${album.title}`}
+      style={{ '--card-glow': glowColor } as React.CSSProperties}
+    >
       <div className={styles.coverWrapper}>
         <Image
           src={imgSrc}

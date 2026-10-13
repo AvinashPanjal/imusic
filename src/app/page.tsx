@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { TrackData, AlbumSummary, PlaylistData } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
-import { Sparkles, UploadCloud, Library, Disc, Film } from 'lucide-react';
+import { HeroSpotlight } from '@/components/home/HeroSpotlight';
+import { CategoryGrid } from '@/components/home/CategoryGrid';
+import { Sparkles, UploadCloud, Library, Disc, Film, Settings, Compass } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function HomePage() {
@@ -113,11 +115,46 @@ export default function HomePage() {
           <h1 className={styles.greeting}>{greeting}</h1>
         </div>
         <div className={styles.headerActions}>
+          <Link href="/settings" className={styles.iconBtn} title="Theme & Audio Settings" aria-label="Settings">
+            <Settings size={20} />
+          </Link>
           <Link href="/import" className={styles.iconBtn} title="Import Music Files" aria-label="Import Music Files">
             <UploadCloud size={20} />
           </Link>
         </div>
       </header>
+
+      {/* Top Dynamic Spotlight Aurora Hero */}
+      <HeroSpotlight />
+
+      {/* Explore Soundscapes & Genres Grid */}
+      <section className={styles.section}>
+        <div className={styles.sectionHeaderRow}>
+          <div>
+            <div className={styles.badgeRow}>
+              <Compass size={18} className={styles.sectionIcon} />
+              <h2 className={styles.sectionTitle}>Explore Soundscapes</h2>
+            </div>
+            <span className={styles.sectionSubtitle}>
+              Curated charts across cinema, retro gold & studio lossless masters
+            </span>
+          </div>
+        </div>
+        <CategoryGrid
+          activeCategory={selectedLanguage}
+          onSelectCategory={(val) => {
+            if (val === 'hires') {
+              const el = document.getElementById('hires-vault');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+              setSelectedLanguage('all');
+            } else if (val === 'retro') {
+              setSelectedLanguage('malayalam');
+            } else {
+              setSelectedLanguage(val as any);
+            }
+          }}
+        />
+      </section>
 
       {/* Featured Movie Soundtracks & Albums */}
       {albums.length > 0 && (
@@ -229,7 +266,7 @@ export default function HomePage() {
 
       {/* Recently Added Hi-Res Tracks */}
       {hiResTracks.length > 0 && (
-        <section className={styles.section}>
+        <section className={styles.section} id="hires-vault">
           <div className={styles.sectionHeaderRow}>
             <div className={styles.badgeRow}>
               <h2 className={styles.sectionTitle}>Hi-Res Lossless Vault</h2>

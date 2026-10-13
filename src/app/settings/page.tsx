@@ -13,17 +13,24 @@ import {
   Trash2,
   Share,
   PlusSquare,
+  Palette,
 } from 'lucide-react';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
+import { THEMES, getStoredTheme, applyTheme, type ThemeId } from '@/lib/theme';
 import styles from './settings.module.css';
 
 export default function SettingsPage() {
+  const [currentTheme, setCurrentTheme] = useState<ThemeId>('violet');
   const [streamingQuality, setStreamingQuality] = useState('auto');
   const [wifiQuality, setWifiQuality] = useState('hires');
   const [cellularQuality, setCellularQuality] = useState('high');
   const [downloadQuality, setDownloadQuality] = useState('lossless');
   const [storageUsage, setStorageUsage] = useState({ usedMB: 0, quotaMB: 0 });
   const [savedNotice, setSavedNotice] = useState(false);
+
+  useEffect(() => {
+    setCurrentTheme(getStoredTheme());
+  }, []);
 
   useEffect(() => {
     // Load settings from backend
@@ -104,6 +111,44 @@ export default function SettingsPage() {
           <Check size={16} /> Preferences updated
         </div>
       )}
+
+      {/* App Appearance & Accent Theme */}
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <Palette size={18} className={styles.sectionIcon} />
+          <h2>App Appearance & Accent Themes</h2>
+        </div>
+
+        <div className={styles.themeGrid}>
+          {THEMES.map((theme) => {
+            const isActive = currentTheme === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                className={`${styles.themeCard} ${isActive ? styles.themeCardActive : ''}`}
+                onClick={() => {
+                  setCurrentTheme(theme.id);
+                  applyTheme(theme.id);
+                  setSavedNotice(true);
+                  setTimeout(() => setSavedNotice(false), 2000);
+                }}
+              >
+                <div
+                  className={styles.themeSwatch}
+                  style={{ background: theme.gradient }}
+                >
+                  {isActive && <Check size={18} className={styles.themeCheck} />}
+                </div>
+                <div className={styles.themeInfo}>
+                  <span className={styles.themeName}>{theme.name}</span>
+                  <span className={styles.themeTagline}>{theme.tagline}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Audio Quality Preferences */}
       <section className={styles.section}>

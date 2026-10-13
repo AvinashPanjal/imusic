@@ -4,10 +4,12 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { usePlayerStore } from '@/store/playerStore';
 import { Play, Pause, SkipForward } from 'lucide-react';
+import { extractAmbientColors } from '@/lib/colorExtractor';
 import styles from './MiniPlayer.module.css';
 
 export const MiniPlayer: React.FC = () => {
   const [mounted, setMounted] = useState(false);
+  const [miniGlow, setMiniGlow] = useState('rgba(124, 58, 237, 0.35)');
   const {
     currentTrack,
     isPlaying,
@@ -22,12 +24,24 @@ export const MiniPlayer: React.FC = () => {
     setMounted(true);
   }, []);
 
+  const artworkUrl = currentTrack?.album?.coverImage || '/icons/default-artwork.png';
+
+  useEffect(() => {
+    if (!currentTrack) return;
+    let active = true;
+    extractAmbientColors(artworkUrl, currentTrack.title).then((p) => {
+      if (active) setMiniGlow(p.glow1);
+    });
+    return () => {
+      active = false;
+    };
+  }, [artworkUrl, currentTrack?.title]);
+
   if (!mounted || !currentTrack) {
     return null;
   }
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const artworkUrl = currentTrack.album?.coverImage || '/icons/default-artwork.png';
   const artistNames = currentTrack.artists?.map((a) => a.name).join(', ') || 'Unknown Artist';
 
   return (
@@ -36,6 +50,7 @@ export const MiniPlayer: React.FC = () => {
       onClick={() => openFullScreenPlayer()}
       role="region"
       aria-label="Now playing bar"
+      style={{ '--mini-glow': miniGlow } as React.CSSProperties}
     >
       {/* Top progress indicator line */}
       <div className={styles.progressBarContainer}>
@@ -60,7 +75,16 @@ export const MiniPlayer: React.FC = () => {
 
         {/* Metadata */}
         <div className={styles.meta}>
-          <div className={styles.title}>{currentTrack.title}</div>
+          <div className={styles.titleRow}>
+            <span className={styles.title}>{currentTrack.title}</span>
+            {isPlaying && (
+              <div className={styles.eqWave} aria-hidden="true" title="Playing">
+                <span className={styles.eqBar} />
+                <span className={styles.eqBar} />
+                <span className={styles.eqBar} />
+              </div>
+            )}
+          </div>
           <div className={styles.artist}>{artistNames}</div>
         </div>
 

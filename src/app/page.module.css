@@ -22,10 +22,12 @@
 }
 
 .greeting {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: var(--text-primary);
+  background: linear-gradient(135deg, #ffffff 65%, var(--accent-hover) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .headerActions {
