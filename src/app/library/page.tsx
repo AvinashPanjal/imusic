@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { TrackData, PlaylistData, AlbumSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
@@ -17,6 +19,11 @@ import {
   Disc,
   FolderPlus,
   HardDrive,
+  Link2,
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 import styles from './library.module.css';
 
@@ -24,6 +31,7 @@ type LibraryTab = 'playlists' | 'favorites' | 'downloaded' | 'tracks' | 'albums'
 type SortField = 'date' | 'title' | 'artist';
 
 export default function LibraryPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<LibraryTab>('playlists');
   const [sortField, setSortField] = useState<SortField>('date');
 
@@ -36,6 +44,22 @@ export default function LibraryPage() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
+
+  // Import Playlist Modal State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importCustomTitle, setImportCustomTitle] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatusText, setImportStatusText] = useState('');
+  const [importResult, setImportResult] = useState<{
+    success: boolean;
+    playlist?: any;
+    totalRequested?: number;
+    importedCount?: number;
+    matchedCount?: number;
+    error?: string;
+  } | null>(null);
+
   const [loading, setLoading] = useState(true);
 
   // Load Library Data
@@ -106,6 +130,67 @@ export default function LibraryPage() {
     }
   };
 
+  const handleImportPlaylist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim() || isImporting) return;
+
+    setIsImporting(true);
+    setImportStatusText('Contacting Spotify & parsing tracklist...');
+    setImportResult(null);
+
+    try {
+      const res = await fetch('/api/playlists/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: importUrl.trim(),
+          customTitle: importCustomTitle.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setImportResult(data);
+        setImportUrl('');
+        setImportCustomTitle('');
+        loadLibrary();
+      } else {
+        setImportResult({
+          success: false,
+          error: data.error || 'Failed to import playlist. Please check link.',
+        });
+      }
+    } catch (err: any) {
+      setImportResult({
+        success: false,
+        error: err.message || 'Network error while importing playlist.',
+      });
+    } finally {
+      setIsImporting(false);
+      setImportStatusText('');
+    }
+  };
+
+  const handleDeletePlaylist = async (e: React.MouseEvent, playlistId: string, playlistTitle: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm(`Are you sure you want to delete "${playlistTitle}"?`)) return;
+
+    try {
+      const res = await fetch(`/api/playlists/${playlistId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+      } else {
+        alert('Could not delete playlist. Please try again.');
+      }
+    } catch (err) {
+      console.error('Delete playlist error:', err);
+    }
+  };
+
   // Sort helper
   const sortTracks = (list: TrackData[]) => {
     return [...list].sort((a, b) => {
@@ -130,6 +215,18 @@ export default function LibraryPage() {
           <h1 className={styles.title}>Your Library</h1>
         </div>
         <div className={styles.headerActions}>
+          <button
+            type="button"
+            className={styles.actionBtn}
+            onClick={() => {
+              setImportResult(null);
+              setShowImportModal(true);
+            }}
+            title="Import Playlist from Spotify"
+            aria-label="Import Playlist from Spotify"
+          >
+            <Link2 size={20} />
+          </button>
           <button
             type="button"
             className={styles.actionBtn}
@@ -216,30 +313,64 @@ export default function LibraryPage() {
             <div className={styles.emptyView}>
               <FolderPlus size={44} className={styles.emptyIcon} />
               <h3>No Playlists Yet</h3>
-              <p>Create custom playlists to organize your lossless favorites.</p>
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                onClick={() => setShowCreateModal(true)}
-              >
-                <Plus size={16} /> New Playlist
-              </button>
+              <p>Create custom playlists or import your favorite playlists from Spotify.</p>
+              <div className={styles.emptyBtnRow}>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  onClick={() => setShowCreateModal(true)}
+                >
+                  <Plus size={16} /> New Playlist
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    setImportResult(null);
+                    setShowImportModal(true);
+                  }}
+                >
+                  <Link2 size={16} /> Import from Spotify
+                </button>
+              </div>
             </div>
           ) : (
             <div className={styles.playlistsList}>
               {playlists.map((pl) => (
-                <Link key={pl.id} href={`/playlists/${pl.id}`} className={styles.playlistRow}>
-                  <div className={styles.playlistArt}>
-                    <LibraryIcon size={22} />
-                  </div>
-                  <div className={styles.playlistMeta}>
-                    <span className={styles.playlistTitle}>{pl.title}</span>
-                    <span className={styles.playlistSubtitle}>
-                      {pl.trackCount} {pl.trackCount === 1 ? 'song' : 'songs'}
-                      {pl.description ? ` • ${pl.description}` : ''}
-                    </span>
-                  </div>
-                </Link>
+                <div key={pl.id} className={styles.playlistRowWrapper}>
+                  <Link href={`/playlists/${pl.id}`} className={styles.playlistRow}>
+                    <div className={styles.playlistArt}>
+                      {pl.coverImage ? (
+                        <Image
+                          src={pl.coverImage}
+                          alt={pl.title}
+                          width={44}
+                          height={44}
+                          className={styles.playlistCoverImg}
+                          unoptimized={pl.coverImage.startsWith('http')}
+                        />
+                      ) : (
+                        <LibraryIcon size={22} />
+                      )}
+                    </div>
+                    <div className={styles.playlistMeta}>
+                      <span className={styles.playlistTitle}>{pl.title}</span>
+                      <span className={styles.playlistSubtitle}>
+                        {pl.trackCount} {pl.trackCount === 1 ? 'song' : 'songs'}
+                        {pl.description ? ` • ${pl.description}` : ''}
+                      </span>
+                    </div>
+                  </Link>
+                  <button
+                    type="button"
+                    className={styles.deletePlaylistBtn}
+                    onClick={(e) => handleDeletePlaylist(e, pl.id, pl.title)}
+                    title={`Delete playlist "${pl.title}"`}
+                    aria-label={`Delete playlist "${pl.title}"`}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -381,6 +512,107 @@ export default function LibraryPage() {
                 </button>
                 <button type="submit" className={styles.submitBtn}>
                   Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Import Playlist Modal */}
+      {showImportModal && (
+        <div className={styles.modalOverlay} onClick={() => !isImporting && setShowImportModal(false)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div className={styles.modalBadgeRow}>
+                <Sparkles size={16} className={styles.sparkleIcon} />
+                <h3>Import Playlist from Spotify / Web</h3>
+              </div>
+              <p className={styles.modalDescription}>
+                Paste any public Spotify playlist link (or JioSaavn album link) to import all songs with instant 320 KBPS playback.
+              </p>
+            </div>
+
+            {importResult && (
+              <div
+                className={`${styles.importResultCard} ${
+                  importResult.success ? styles.importResultSuccess : styles.importResultError
+                }`}
+              >
+                {importResult.success ? (
+                  <>
+                    <div className={styles.resultTitleRow}>
+                      <CheckCircle2 size={18} className={styles.successIcon} />
+                      <strong>Imported &ldquo;{importResult.playlist?.title}&rdquo;!</strong>
+                    </div>
+                    <p className={styles.resultDetails}>
+                      {importResult.matchedCount} of {importResult.importedCount} songs matched with full 320 KBPS audio streams.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.viewPlaylistBtn}
+                      onClick={() => {
+                        setShowImportModal(false);
+                        router.push(`/playlists/${importResult.playlist?.id}`);
+                      }}
+                    >
+                      Open Playlist Now &rarr;
+                    </button>
+                  </>
+                ) : (
+                  <p className={styles.errorDetails}>{importResult.error}</p>
+                )}
+              </div>
+            )}
+
+            <form onSubmit={handleImportPlaylist} className={styles.modalForm}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>Spotify Playlist Link or Song List</label>
+                <input
+                  type="text"
+                  placeholder="https://open.spotify.com/playlist/..."
+                  value={importUrl}
+                  onChange={(e) => setImportUrl(e.target.value)}
+                  disabled={isImporting}
+                  required
+                  className={styles.modalInput}
+                />
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>Custom Title (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="Leave empty to use Spotify title"
+                  value={importCustomTitle}
+                  onChange={(e) => setImportCustomTitle(e.target.value)}
+                  disabled={isImporting}
+                  className={styles.modalInput}
+                />
+              </div>
+
+              {isImporting && (
+                <div className={styles.importingStatus}>
+                  <Loader2 size={18} className={styles.spinner} />
+                  <span>{importStatusText || 'Importing songs & matching 320 KBPS streams...'}</span>
+                </div>
+              )}
+
+              <div className={styles.modalBtnRow}>
+                <button
+                  type="button"
+                  className={styles.cancelBtn}
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isImporting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={styles.submitBtn}
+                  disabled={isImporting || !importUrl.trim()}
+                >
+                  {isImporting ? 'Importing...' : 'Import Playlist'}
                 </button>
               </div>
             </form>
