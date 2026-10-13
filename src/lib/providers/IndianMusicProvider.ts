@@ -1,5 +1,6 @@
 import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult } from './types';
 import { TrackData, AlbumSummary } from '@/types/music';
+import { findMatchingFeaturedSoundtracks } from '@/lib/constants/soundtracks';
 import CryptoJS from 'crypto-js';
 
 const SAAVN_API_BASE = 'https://www.jiosaavn.com/api.php';
@@ -49,6 +50,20 @@ export function getQueryVariants(q: string): string[] {
   for (const b of bases) {
     const lower = b.toLowerCase();
 
+    // Specific canonicalization for Bethlehem Kudumba Unit
+    if (lower.includes('bethleham')) {
+      variants.add(b.replace(/bethleham/gi, 'bethlehem'));
+    }
+    if (lower.includes('kudba')) {
+      variants.add(b.replace(/kudba/gi, 'kudumba'));
+    }
+    if (lower.includes('bethlehem') && !lower.includes('kudumba')) {
+      variants.add('bethlehem kudumba unit');
+    }
+    if (lower.includes('kudumba') && !lower.includes('bethlehem')) {
+      variants.add('bethlehem kudumba unit');
+    }
+
     // Known Indian regional transliteration differences
     if (lower.includes('indrajalam')) {
       variants.add(b.replace(/indrajalam/gi, 'indrajaalam'));
@@ -61,9 +76,6 @@ export function getQueryVariants(q: string): string[] {
     }
     if (lower.includes('aavesham')) {
       variants.add(b.replace(/aavesham/gi, 'avesham'));
-    }
-    if (lower.includes('kudumba')) {
-      variants.add(b.replace(/kudumba/gi, 'kudumbam'));
     }
     if (lower.includes('kudumbam')) {
       variants.add(b.replace(/kudumbam/gi, 'kudumba'));
@@ -184,6 +196,40 @@ export class IndianMusicProvider implements CatalogueProvider {
       const batchResults = await Promise.all(searchPromises);
       let rawResults = batchResults.flatMap((b) => b.rawSongs);
       let rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
+
+      // Prepend any featured/blockbuster soundtracks matching query with fuzzy matching
+      const matchingFeatured = findMatchingFeaturedSoundtracks(q);
+      for (const st of matchingFeatured) {
+        rawAlbumResults.unshift({
+          albumid: st.id.replace('saavn-album-', ''),
+          title: st.title,
+          image: st.coverImage,
+          music: st.artistName,
+          year: String(st.releaseYear || 2026),
+        });
+      }
+
+      // If matching featured soundtracks exist (e.g. Bethlehem Kudumba Unit, Indrajaalam),
+      // fetch their official tracklists so their songs are guaranteed to be in search results!
+      if (matchingFeatured.length > 0) {
+        const albumFetchPromises = matchingFeatured.slice(0, 2).map(async (st) => {
+          const rawAlbumId = st.id.replace('saavn-album-', '');
+          const albumUrl = `${SAAVN_API_BASE}?__call=content.getAlbumDetails&_format=json&_marker=0&cc=in&albumid=${encodeURIComponent(
+            rawAlbumId
+          )}`;
+          try {
+            const res = await fetch(albumUrl, { headers }).then((r) => r.json());
+            return (res.songs || []) as any[];
+          } catch {
+            return [];
+          }
+        });
+
+        const albumSongBatches = await Promise.all(albumFetchPromises);
+        for (const songs of albumSongBatches) {
+          rawResults.unshift(...songs);
+        }
+      }
 
       // Process autocomplete results from all query variants
       const topSongIdsToFetch = new Set<string>();

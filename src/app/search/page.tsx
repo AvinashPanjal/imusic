@@ -9,93 +9,11 @@ import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { usePlayerStore } from '@/store/playerStore';
 import { normalizeSearchText, cleanQuery } from '@/lib/providers/IndianMusicProvider';
+import { FEATURED_SOUNDTRACKS, fuzzyMatch } from '@/lib/constants/soundtracks';
 import styles from './search.module.css';
 
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
-
-const POPULAR_SOUNDTRACKS: AlbumSummary[] = [
-  {
-    id: 'saavn-album-79759837',
-    title: 'Bethlehem Kudumba Unit',
-    artistName: 'Vishnu Vijay',
-    coverImage: 'https://c.saavncdn.com/569/Bethlehem-Kudumba-Unit-Malayalam-2026-20260901164324-500x500.jpg',
-    releaseYear: 2026,
-    genre: 'Malayalam / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-55472703',
-    title: 'Indrajaalam',
-    artistName: 'S. P. Venkatesh, Mohanlal',
-    coverImage: 'https://c.saavncdn.com/494/Indrajaalam-Malayalam-2024-20250403152648-500x500.jpg',
-    releaseYear: 1990,
-    genre: 'Malayalam / Classic Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-49113982',
-    title: 'Leo',
-    artistName: 'Anirudh Ravichander',
-    coverImage: 'https://c.saavncdn.com/415/Leo-Original-Motion-Picture-Soundtrack-English-2023-20231019170311-500x500.jpg',
-    releaseYear: 2023,
-    genre: 'Tamil / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-52210422',
-    title: 'Aavesham',
-    artistName: 'Sushin Shyam',
-    coverImage: 'https://c.saavncdn.com/202/Aavesham-Original-Motion-Picture-Soundtrack-Malayalam-2024-20240411130634-500x500.jpg',
-    releaseYear: 2024,
-    genre: 'Malayalam / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-47094777',
-    title: 'Jailer',
-    artistName: 'Anirudh Ravichander',
-    coverImage: 'https://c.saavncdn.com/777/Jailer-Tamil-2023-20230728183015-500x500.jpg',
-    releaseYear: 2023,
-    genre: 'Tamil / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-51419924',
-    title: 'Manjummel Boys',
-    artistName: 'Sushin Shyam',
-    coverImage: 'https://c.saavncdn.com/924/Manjummel-Boys-Original-Motion-Picture-Soundtrack-Malayalam-2024-20240222041203-500x500.jpg',
-    releaseYear: 2024,
-    genre: 'Malayalam / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-49986024',
-    title: 'ANIMAL',
-    artistName: 'Pritam',
-    coverImage: 'https://c.saavncdn.com/024/ANIMAL-Hindi-2023-20231124191427-500x500.jpg',
-    releaseYear: 2023,
-    genre: 'Hindi / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-35003732',
-    title: 'Vikram',
-    artistName: 'Anirudh Ravichander',
-    coverImage: 'https://c.saavncdn.com/732/Vikram-Tamil-2022-20220515182605-500x500.jpg',
-    releaseYear: 2022,
-    genre: 'Tamil / Soundtrack',
-    isLossless: true,
-  },
-  {
-    id: 'saavn-album-25118096',
-    title: 'The Highlights',
-    artistName: 'The Weeknd',
-    coverImage: 'https://c.saavncdn.com/396/The-Highlights-English-2021-20240207045714-500x500.jpg',
-    releaseYear: 2021,
-    genre: 'Global / Pop',
-    isLossless: true,
-  },
-];
+const POPULAR_SOUNDTRACKS: AlbumSummary[] = FEATURED_SOUNDTRACKS;
 
 export default function SearchPage() {
   const router = useRouter();
@@ -234,7 +152,8 @@ export default function SearchPage() {
       (normTrackTitle === normQuery ||
         (cleanNormQ && normTrackTitle === cleanNormQ) ||
         normTrackTitle.startsWith(normQuery) ||
-        (cleanNormQ && normTrackTitle.startsWith(cleanNormQ)))
+        (cleanNormQ && normTrackTitle.startsWith(cleanNormQ)) ||
+        fuzzyMatch(topTrack?.title || '', debouncedQuery))
   );
 
   const isAlbumExact = Boolean(
@@ -242,7 +161,8 @@ export default function SearchPage() {
       (normAlbumTitle === normQuery ||
         (cleanNormQ && normAlbumTitle === cleanNormQ) ||
         normAlbumTitle.startsWith(normQuery) ||
-        (cleanNormQ && normAlbumTitle.startsWith(cleanNormQ)))
+        (cleanNormQ && normAlbumTitle.startsWith(cleanNormQ)) ||
+        fuzzyMatch(topAlbum?.title || '', debouncedQuery))
   );
 
   // Check if query explicitly asks for a soundtrack, album, or movie
@@ -255,6 +175,7 @@ export default function SearchPage() {
       (isExplicitAlbumSearch ||
         (!isTrackExact &&
           (isAlbumExact ||
+            fuzzyMatch(topAlbum.title, debouncedQuery) ||
             normAlbumTitle.includes(normQuery) ||
             normQuery.includes(normAlbumTitle) ||
             topAlbum.title.toLowerCase().includes(queryLower) ||
@@ -269,14 +190,15 @@ export default function SearchPage() {
         if (res.ok) {
           const data = await res.json();
           if (data.album?.tracks?.length > 0) {
-            // Find track in album that matches the search query
+            // Find track in album that matches the search query (using exact, clean or fuzzy match)
             const matchingTrackIdx = data.album.tracks.findIndex((t: TrackData) => {
               const tNorm = normalizeSearchText(t.title);
               return (
                 tNorm === normQuery ||
                 (cleanNormQ && tNorm === cleanNormQ) ||
                 tNorm.includes(normQuery) ||
-                normQuery.includes(tNorm)
+                normQuery.includes(tNorm) ||
+                fuzzyMatch(t.title, debouncedQuery)
               );
             });
             const playIdx = matchingTrackIdx >= 0 ? matchingTrackIdx : 0;
