@@ -228,13 +228,16 @@ export class IndianMusicProvider implements CatalogueProvider {
         });
       }
 
-      // If matching featured soundtracks exist (e.g. Bethlehem Kudumba Unit, Indrajaalam),
-      // fetch their official tracklists so their songs are guaranteed to be in search results!
-      if (matchingFeatured.length > 0) {
-        const albumFetchPromises = matchingFeatured.slice(0, 2).map(async (st) => {
-          const rawAlbumId = st.id.replace('saavn-album-', '');
+      // Extract complete tracklists from top matching albums (both featured and dynamic movie album search results)
+      const albumsToFetch = [
+        ...matchingFeatured.map((st) => st.id.replace('saavn-album-', '')),
+        ...rawAlbumResults.map((al) => al.albumid).filter(Boolean),
+      ].slice(0, 3);
+
+      if (albumsToFetch.length > 0) {
+        const albumFetchPromises = albumsToFetch.map(async (albumId) => {
           const albumUrl = `${SAAVN_API_BASE}?__call=content.getAlbumDetails&_format=json&_marker=0&cc=in&albumid=${encodeURIComponent(
-            rawAlbumId
+            albumId
           )}`;
           try {
             const res = await fetch(albumUrl, { headers }).then((r) => r.json());

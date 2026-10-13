@@ -559,10 +559,10 @@ export default function LibraryPage() {
             <div className={styles.modalHeader}>
               <div className={styles.modalBadgeRow}>
                 <Sparkles size={16} className={styles.sparkleIcon} />
-                <h3>Import Playlist from Spotify / Web</h3>
+                <h3>Import Playlist (Spotify, YouTube & Web)</h3>
               </div>
               <p className={styles.modalDescription}>
-                Paste any public Spotify playlist link (or JioSaavn album link) to import all songs with instant 320 KBPS playback.
+                Paste any Spotify playlist, JioSaavn link, or song titles to import with instant audio playback. 100% Free.
               </p>
             </div>
 
@@ -579,7 +579,7 @@ export default function LibraryPage() {
                       <strong>Imported &ldquo;{importResult.playlist?.title}&rdquo;!</strong>
                     </div>
                     <p className={styles.resultDetails}>
-                      {importResult.matchedCount} of {importResult.importedCount} songs matched with full 320 KBPS audio streams.
+                      {importResult.matchedCount} of {importResult.importedCount} songs matched with full playable audio streams.
                     </p>
                     <button
                       type="button"
@@ -600,10 +600,10 @@ export default function LibraryPage() {
 
             <form onSubmit={handleImportPlaylist} className={styles.modalForm}>
               <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>Spotify Playlist Link or Song List</label>
+                <label className={styles.fieldLabel}>Spotify Link, YouTube Link, or Song List</label>
                 <input
                   type="text"
-                  placeholder="https://open.spotify.com/playlist/..."
+                  placeholder="https://open.spotify.com/playlist/... or song titles"
                   value={importUrl}
                   onChange={(e) => setImportUrl(e.target.value)}
                   disabled={isImporting}
@@ -616,7 +616,7 @@ export default function LibraryPage() {
                 <label className={styles.fieldLabel}>Custom Title (Optional)</label>
                 <input
                   type="text"
-                  placeholder="Leave empty to use Spotify title"
+                  placeholder="Leave empty to use original title"
                   value={importCustomTitle}
                   onChange={(e) => setImportCustomTitle(e.target.value)}
                   disabled={isImporting}

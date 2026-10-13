@@ -3,8 +3,20 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { usePlayerStore } from '@/store/playerStore';
 
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: any;
+  }
+}
+
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ytPlayerRef = useRef<any>(null);
+  const isYtReadyRef = useRef<boolean>(false);
+  const pendingYtVideoIdRef = useRef<string | null>(null);
+  const ytProgressIntervalRef = useRef<any>(null);
+
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
 
@@ -26,142 +38,268 @@ export const AudioEngine: React.FC = () => {
     updatePlaybackProgress,
   } = usePlayerStore();
 
-  // Helper to resolve playable URL
-  const resolveTrackUrl = useCallback(async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
+  const isYouTubeTrack = useCallback((track: typeof currentTrack): boolean => {
+    if (!track) return false;
+    return Boolean(
+      track.id?.startsWith('yt-') ||
+      track.providerCode === 'youtube' ||
+      track.streamUrl?.startsWith('youtube:') ||
+      track.assets?.[0]?.storageKey?.startsWith('youtube:')
+    );
+  }, []);
+
+  const getYouTubeVideoId = useCallback((track: typeof currentTrack): string | null => {
     if (!track) return null;
-    if (track.streamUrl && !forceRefresh) return track.streamUrl;
-
-    // Check if track has an audio asset (when not forcing remote refresh)
-    if (!forceRefresh) {
-      const primaryAsset = track.assets?.[0];
-      if (primaryAsset) {
-        if (primaryAsset.storageType === 'remote_stream') {
-          return primaryAsset.storageKey;
-        }
-        return `/api/stream/${primaryAsset.id}`;
-      }
+    if (track.streamUrl?.startsWith('youtube:')) {
+      return track.streamUrl.replace('youtube:', '');
     }
-
-    // Try resolving through the playback resolve endpoint
-    try {
-      const res = await fetch('/api/playback/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trackId: track.id,
-          title: track.title,
-          artist: track.artists?.[0]?.name,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.streamUrl || null;
-      }
-    } catch (err) {
-      console.error('Error resolving stream URL:', err);
+    const assetKey = track.assets?.[0]?.storageKey;
+    if (assetKey?.startsWith('youtube:')) {
+      return assetKey.replace('youtube:', '');
+    }
+    if (track.id?.startsWith('yt-')) {
+      return track.id.replace('yt-', '');
     }
     return null;
   }, []);
 
-  // Update Media Session API for iOS Lock Screen & Dynamic Island
-  const updateMediaSession = useCallback((track: typeof currentTrack) => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !track) {
-      return;
-    }
+  // Helper to resolve playable URL for standard audio
+  const resolveTrackUrl = useCallback(
+    async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
+      if (!track) return null;
+      if (track.streamUrl && !forceRefresh && !track.streamUrl.startsWith('youtube:')) {
+        return track.streamUrl;
+      }
 
-    try {
-      const rawArt = track.album?.coverImage || '/icons/default-artwork.png';
-      const toAbsoluteUrl = (url: string) => {
-        if (!url) return '';
-        if (url.startsWith('http://') || url.startsWith('https://')) return url;
-        if (typeof window !== 'undefined') {
-          return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
-        }
-        return url;
-      };
-      const artworkUrl = toAbsoluteUrl(rawArt);
-      const artistNames = track.artists?.map((a) => a.name).join(', ') || 'Unknown Artist';
-
-      navigator.mediaSession.metadata = new window.MediaMetadata({
-        title: track.title,
-        artist: artistNames,
-        album: track.album?.title || '',
-        artwork: [
-          { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
-          { src: artworkUrl, sizes: '128x128', type: 'image/jpeg' },
-          { src: artworkUrl, sizes: '192x192', type: 'image/jpeg' },
-          { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
-          { src: artworkUrl, sizes: '384x384', type: 'image/jpeg' },
-          { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' },
-        ],
-      });
-
-      // Register Media Session handlers safely
-      const actionHandlers: [MediaSessionAction, MediaSessionActionHandler][] = [
-        ['play', () => resume()],
-        ['pause', () => pause()],
-        ['previoustrack', () => previousTrack()],
-        ['nexttrack', () => nextTrack()],
-        ['seekto', (details) => {
-          if (details.seekTime !== undefined && !isNaN(details.seekTime)) {
-            seek(details.seekTime);
+      // Check if track has an audio asset (when not forcing remote refresh)
+      if (!forceRefresh) {
+        const primaryAsset = track.assets?.[0];
+        if (primaryAsset) {
+          if (primaryAsset.storageType === 'remote_stream' && !primaryAsset.storageKey.startsWith('youtube:')) {
+            return primaryAsset.storageKey;
           }
-        }],
-        ['seekbackward', (details) => {
-          const skip = details.seekOffset || 10;
-          if (audioRef.current) {
-            seek(Math.max(0, audioRef.current.currentTime - skip));
+          if (primaryAsset.id) {
+            return `/api/stream/${primaryAsset.id}`;
           }
-        }],
-        ['seekforward', (details) => {
-          const skip = details.seekOffset || 10;
-          if (audioRef.current) {
-            seek(Math.min(audioRef.current.duration || 0, audioRef.current.currentTime + skip));
-          }
-        }],
-      ];
-
-      for (const [action, handler] of actionHandlers) {
-        try {
-          navigator.mediaSession.setActionHandler(action, handler);
-        } catch {
-          // Action might not be supported on this browser version
         }
       }
-    } catch (e) {
-      console.warn('Failed setting MediaSession metadata', e);
-    }
-  }, [resume, pause, previousTrack, nextTrack, seek]);
+
+      // Try resolving through the playback resolve endpoint
+      try {
+        const res = await fetch('/api/playback/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trackId: track.id,
+            title: track.title,
+            artist: track.artists?.[0]?.name,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return data.streamUrl || null;
+        }
+      } catch (err) {
+        console.error('Error resolving stream URL:', err);
+      }
+      return null;
+    },
+    []
+  );
+
+  // Update Media Session API for iOS Lock Screen & Dynamic Island
+  const updateMediaSession = useCallback(
+    (track: typeof currentTrack) => {
+      if (typeof window === 'undefined' || !('mediaSession' in navigator) || !track) {
+        return;
+      }
+
+      try {
+        const rawArt = track.album?.coverImage || '/icons/default-artwork.png';
+        const toAbsoluteUrl = (url: string) => {
+          if (!url) return '';
+          if (url.startsWith('http://') || url.startsWith('https://')) return url;
+          if (typeof window !== 'undefined') {
+            return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+          }
+          return url;
+        };
+        const artworkUrl = toAbsoluteUrl(rawArt);
+        const artistNames = track.artists?.map((a) => a.name).join(', ') || 'Unknown Artist';
+
+        navigator.mediaSession.metadata = new window.MediaMetadata({
+          title: track.title,
+          artist: artistNames,
+          album: track.album?.title || '',
+          artwork: [
+            { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '128x128', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '192x192', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '384x384', type: 'image/jpeg' },
+            { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' },
+          ],
+        });
+
+        // Register Media Session handlers safely
+        const actionHandlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+          ['play', () => resume()],
+          ['pause', () => pause()],
+          ['previoustrack', () => previousTrack()],
+          ['nexttrack', () => nextTrack()],
+          [
+            'seekto',
+            (details) => {
+              if (details.seekTime !== undefined && !isNaN(details.seekTime)) {
+                seek(details.seekTime);
+              }
+            },
+          ],
+          [
+            'seekbackward',
+            (details) => {
+              const skip = details.seekOffset || 10;
+              const cur = audioRef.current?.currentTime || currentTime;
+              seek(Math.max(0, cur - skip));
+            },
+          ],
+          [
+            'seekforward',
+            (details) => {
+              const skip = details.seekOffset || 10;
+              const cur = audioRef.current?.currentTime || currentTime;
+              seek(cur + skip);
+            },
+          ],
+        ];
+
+        for (const [action, handler] of actionHandlers) {
+          try {
+            navigator.mediaSession.setActionHandler(action, handler);
+          } catch {}
+        }
+      } catch (e) {
+        console.warn('Failed setting MediaSession metadata', e);
+      }
+    },
+    [resume, pause, previousTrack, nextTrack, seek, currentTime]
+  );
 
   // Update Media Session position state
   const updateMediaSessionPosition = useCallback(() => {
     if (
       typeof window === 'undefined' ||
       !('mediaSession' in navigator) ||
-      !('setPositionState' in navigator.mediaSession) ||
-      !audioRef.current
+      !('setPositionState' in navigator.mediaSession)
     ) {
       return;
     }
 
     try {
-      const audio = audioRef.current;
-      if (!isNaN(audio.duration) && audio.duration > 0 && !isNaN(audio.currentTime)) {
+      const isYt = isYouTubeTrack(currentTrack);
+      const cur = isYt && ytPlayerRef.current?.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : audioRef.current?.currentTime;
+      const dur = isYt && ytPlayerRef.current?.getDuration ? ytPlayerRef.current.getDuration() : audioRef.current?.duration;
+
+      if (!isNaN(dur) && dur > 0 && !isNaN(cur)) {
         navigator.mediaSession.setPositionState({
-          duration: audio.duration,
-          playbackRate: audio.playbackRate || 1,
-          position: Math.min(audio.currentTime, audio.duration),
+          duration: dur,
+          playbackRate: 1,
+          position: Math.min(cur, dur),
         });
       }
-    } catch {
-      // Ignore transient position state errors on rapid seeks
+    } catch {}
+  }, [currentTrack, isYouTubeTrack]);
+
+  // Initialize YouTube IFrame Player
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const initYt = () => {
+      if (ytPlayerRef.current || !window.YT?.Player) return;
+      try {
+        ytPlayerRef.current = new window.YT.Player('imusic-yt-iframe', {
+          height: '200',
+          width: '200',
+          videoId: '',
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            modestbranding: 1,
+            playsinline: 1,
+            origin: window.location.origin,
+          },
+          events: {
+            onReady: () => {
+              isYtReadyRef.current = true;
+              if (pendingYtVideoIdRef.current) {
+                const vid = pendingYtVideoIdRef.current;
+                pendingYtVideoIdRef.current = null;
+                ytPlayerRef.current.loadVideoById(vid);
+                const targetVol = isMuted ? 0 : Math.round(volume * 100);
+                ytPlayerRef.current.setVolume(targetVol);
+              }
+            },
+            onStateChange: (event: any) => {
+              // 1: PLAYING, 2: PAUSED, 0: ENDED, 3: BUFFERING
+              if (event.data === 1) {
+                setIsPlaying(true);
+                setIsLoading(false);
+                setNetworkInterrupted(false);
+                if ('mediaSession' in navigator) {
+                  navigator.mediaSession.playbackState = 'playing';
+                }
+              } else if (event.data === 2) {
+                if (!usePlayerStore.getState().isPlaying) {
+                  if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'paused';
+                  }
+                }
+              } else if (event.data === 3) {
+                setIsLoading(true);
+              } else if (event.data === 0) {
+                nextTrack();
+              }
+            },
+            onError: (err: any) => {
+              console.warn('YouTube playback error:', err);
+              setIsLoading(false);
+              setError('Failed to play YouTube audio stream');
+            },
+          },
+        });
+      } catch (e) {
+        console.warn('Could not initialize YouTube player:', e);
+      }
+    };
+
+    if (window.YT && window.YT.Player) {
+      initYt();
+    } else {
+      const prevCallback = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        if (prevCallback) prevCallback();
+        initYt();
+      };
+      if (!document.getElementById('yt-iframe-api-script')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api-script';
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const first = document.getElementsByTagName('script')[0];
+        first?.parentNode?.insertBefore(tag, first);
+      }
     }
-  }, []);
+
+    return () => {
+      if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
+    };
+  }, [nextTrack, setError, setIsLoading, setIsPlaying, setNetworkInterrupted, isMuted, volume]);
 
   // Handle track source changes
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !currentTrack) return;
+    if (!currentTrack) return;
 
     if (lastTrackIdRef.current === currentTrack.id) {
       return;
@@ -172,15 +310,72 @@ export const AudioEngine: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
-    // Helper to safely apply volume & mute across all platforms
+    const isYt = isYouTubeTrack(currentTrack);
+
+    // ============================================
+    // PATH A: YOUTUBE TRACK
+    // ============================================
+    if (isYt) {
+      // Pause and unload HTML5 audio
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+      }
+
+      const vid = getYouTubeVideoId(currentTrack);
+      if (!vid) {
+        setError('YouTube video ID not found for this track');
+        setIsLoading(false);
+        return;
+      }
+
+      updateMediaSession(currentTrack);
+
+      if (isYtReadyRef.current && ytPlayerRef.current?.loadVideoById) {
+        ytPlayerRef.current.loadVideoById(vid);
+        const targetVol = isMuted ? 0 : Math.round(volume * 100);
+        ytPlayerRef.current.setVolume(targetVol);
+      } else {
+        pendingYtVideoIdRef.current = vid;
+      }
+
+      // Start progress sync interval for YouTube
+      if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
+      ytProgressIntervalRef.current = setInterval(() => {
+        if (ytPlayerRef.current?.getCurrentTime) {
+          try {
+            const cur = ytPlayerRef.current.getCurrentTime() || 0;
+            const dur = ytPlayerRef.current.getDuration() || currentTrack.duration || 180;
+            updatePlaybackProgress(cur, dur);
+            updateMediaSessionPosition();
+          } catch {}
+        }
+      }, 350);
+
+      return;
+    }
+
+    // ============================================
+    // PATH B: STANDARD AUDIO TRACK (320 KBPS AAC)
+    // ============================================
+    if (!audio) return;
+
+    // Clear YouTube interval & pause YouTube player
+    if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
+    if (isYtReadyRef.current && ytPlayerRef.current?.pauseVideo) {
+      try {
+        ytPlayerRef.current.pauseVideo();
+      } catch {}
+    }
+
     const targetVol = isMuted ? 0 : Math.max(0, Math.min(1, volume));
     try {
       audio.volume = targetVol;
       audio.muted = isMuted;
     } catch {}
 
-    // Fast path: if streamUrl is already known, load synchronously for instant background transitions
-    if (currentTrack.streamUrl) {
+    // Fast path: if streamUrl is already known, load synchronously
+    if (currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')) {
       audio.src = currentTrack.streamUrl;
       audio.load();
       try {
@@ -242,10 +437,41 @@ export const AudioEngine: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [currentTrack, isPlaying, resolveTrackUrl, updateMediaSession, setError, setIsLoading, setIsPlaying]);
+  }, [
+    currentTrack,
+    isPlaying,
+    isYouTubeTrack,
+    getYouTubeVideoId,
+    resolveTrackUrl,
+    updateMediaSession,
+    updatePlaybackProgress,
+    updateMediaSessionPosition,
+    setError,
+    setIsLoading,
+    setIsPlaying,
+    volume,
+    isMuted,
+  ]);
 
   // Handle play / pause toggle
   useEffect(() => {
+    const isYt = isYouTubeTrack(currentTrack);
+
+    if (isYt) {
+      if (isYtReadyRef.current && ytPlayerRef.current) {
+        try {
+          if (isPlaying) {
+            ytPlayerRef.current.playVideo();
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+          } else {
+            ytPlayerRef.current.pauseVideo();
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+          }
+        } catch {}
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio || !audio.src) return;
 
@@ -271,10 +497,24 @@ export const AudioEngine: React.FC = () => {
         navigator.mediaSession.playbackState = 'paused';
       }
     }
-  }, [isPlaying, setIsPlaying]);
+  }, [isPlaying, setIsPlaying, currentTrack, isYouTubeTrack]);
 
   // Handle seek synchronization
   useEffect(() => {
+    const isYt = isYouTubeTrack(currentTrack);
+
+    if (isYt) {
+      if (isYtReadyRef.current && ytPlayerRef.current?.seekTo) {
+        try {
+          const cur = ytPlayerRef.current.getCurrentTime() || 0;
+          if (Math.abs(cur - currentTime) > 1.5) {
+            ytPlayerRef.current.seekTo(currentTime, true);
+          }
+        } catch {}
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -282,19 +522,31 @@ export const AudioEngine: React.FC = () => {
       audio.currentTime = currentTime;
       updateMediaSessionPosition();
     }
-  }, [currentTime, updateMediaSessionPosition]);
+  }, [currentTime, currentTrack, isYouTubeTrack, updateMediaSessionPosition]);
 
   // Handle volume / mute
   useEffect(() => {
+    const isYt = isYouTubeTrack(currentTrack);
+
+    if (isYt) {
+      if (isYtReadyRef.current && ytPlayerRef.current?.setVolume) {
+        try {
+          const targetVol = isMuted ? 0 : Math.round(volume * 100);
+          ytPlayerRef.current.setVolume(targetVol);
+        } catch {}
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio) return;
     try {
       audio.volume = isMuted ? 0 : volume;
       audio.muted = isMuted;
     } catch {}
-  }, [volume, isMuted]);
+  }, [volume, isMuted, currentTrack, isYouTubeTrack]);
 
-  // Setup audio event listeners and visibility recovery
+  // Setup standard audio event listeners
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -325,8 +577,6 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handlePause = () => {
-      // CRITICAL FOR IOS: Do NOT mark isPlaying as false if the pause was an iOS background handoff!
-      // Only reflect pause if the user explicitly commanded pause from the app or MediaSession
       if (!usePlayerStore.getState().isPlaying) {
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'paused';
@@ -355,28 +605,24 @@ export const AudioEngine: React.FC = () => {
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
-      // Attempt single retry recovery if URL expired or broken 404 compilation release
       if (retryCountRef.current === 0 && currentTrack) {
         retryCountRef.current += 1;
-        console.log('Attempting stream recovery for track:', currentTrack.title);
-        setIsLoading(true);
-        const newUrl = await resolveTrackUrl(currentTrack, true);
-        if (newUrl && newUrl !== audio.src) {
-          console.log('Recovered alternative stream URL:', newUrl);
-          // Update track in player store so subsequent plays/seeks use this working URL
-          usePlayerStore.setState({
-            currentTrack: { ...currentTrack, streamUrl: newUrl },
-          });
-          audio.src = newUrl;
-          audio.load();
-          if (usePlayerStore.getState().isPlaying) {
-            audio.play().catch((err) => console.warn('Retry play error:', err));
+        console.log(`Attempting stream recovery for track: ${currentTrack.title}`);
+        try {
+          const freshUrl = await resolveTrackUrl(currentTrack, true);
+          if (freshUrl && audio) {
+            console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
+            audio.src = freshUrl;
+            audio.load();
+            audio.play().catch(() => {});
+            return;
           }
-          return;
+        } catch (recoverErr) {
+          console.warn('Alternative stream recovery attempt failed:', recoverErr);
         }
       }
 
-      setError('Audio stream unavailable. Playing next track...');
+      setError('Audio stream unavailable. Skipping to next track...');
       setTimeout(() => {
         nextTrack();
       }, 1500);
@@ -391,10 +637,10 @@ export const AudioEngine: React.FC = () => {
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('error', handleError);
 
-    // Online / Offline network recovery
     const handleOnline = () => {
       setNetworkInterrupted(false);
-      if (isPlaying && audio.paused) {
+      const state = usePlayerStore.getState();
+      if (state.isPlaying && audio.paused && audio.src) {
         audio.play().catch(() => {});
       }
     };
@@ -403,7 +649,6 @@ export const AudioEngine: React.FC = () => {
       setNetworkInterrupted(true);
     };
 
-    // Ensure audio stays in sync when returning from background
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const state = usePlayerStore.getState();
@@ -441,23 +686,40 @@ export const AudioEngine: React.FC = () => {
     resolveTrackUrl,
     currentTrack,
     isPlaying,
+    isMuted,
+    volume,
   ]);
 
   return (
-    <audio
-      ref={audioRef}
-      playsInline
-      preload="auto"
-      style={{
-        position: 'fixed',
-        top: '-9999px',
-        left: '-9999px',
-        width: '1px',
-        height: '1px',
-        opacity: 0.001,
-        pointerEvents: 'none',
-      }}
-      aria-hidden="true"
-    />
+    <>
+      <audio
+        ref={audioRef}
+        playsInline
+        preload="auto"
+        style={{
+          position: 'fixed',
+          top: '-9999px',
+          left: '-9999px',
+          width: '1px',
+          height: '1px',
+          opacity: 0.001,
+          pointerEvents: 'none',
+        }}
+        aria-hidden="true"
+      />
+      <div
+        id="imusic-yt-iframe"
+        style={{
+          position: 'fixed',
+          top: '-9999px',
+          left: '-9999px',
+          width: '200px',
+          height: '200px',
+          opacity: 0.001,
+          pointerEvents: 'none',
+        }}
+        aria-hidden="true"
+      />
+    </>
   );
 };
