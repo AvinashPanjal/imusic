@@ -126,6 +126,7 @@ export class YouTubeProvider implements CatalogueProvider {
         id: trackId,
         title: cleanTitle,
         duration: durationSeconds,
+        streamUrl: `youtube:${v.id}`,
         trackNumber: i + 1,
         genre: 'YouTube Music',
         artists: [

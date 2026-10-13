@@ -88,9 +88,9 @@ export async function POST(request: NextRequest) {
 
     const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
 
-    // Check if this is a JioSaavn external track or needs external stream recovery
-    if (trackId.startsWith('saavn-') || !trackId) {
-      const rawId = trackId.replace('saavn-', '');
+    // Check if this is an external track (saavn- or yt-) or needs external stream recovery
+    if (trackId.startsWith('saavn-') || trackId.startsWith('yt-') || !trackId) {
+      const rawId = trackId.replace(/^(saavn-|yt-)/, '');
       const saavnResult = await resolveJioSaavnStream(rawId, title);
       if (saavnResult?.streamUrl) {
         return NextResponse.json({
@@ -99,13 +99,31 @@ export async function POST(request: NextRequest) {
           title: saavnResult.title || title || 'Audio Track',
           recovered: saavnResult.recovered,
           asset: {
-            id: `saavn-asset-${rawId}`,
+            id: `asset-${rawId}`,
             format: 'mp4',
             codec: 'AAC',
             bitDepth: 16,
             sampleRate: 44100,
             bitrate: 320,
             isLossless: true,
+            isHiRes: false,
+          },
+        });
+      }
+
+      if (trackId.startsWith('yt-')) {
+        const vid = trackId.replace(/^yt-/, '');
+        return NextResponse.json({
+          streamUrl: `youtube:${vid}`,
+          trackId,
+          title: title || 'YouTube Track',
+          recovered: false,
+          asset: {
+            id: `yt-asset-${vid}`,
+            format: 'm4a',
+            codec: 'AAC',
+            bitrate: 160,
+            isLossless: false,
             isHiRes: false,
           },
         });

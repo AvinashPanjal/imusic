@@ -228,7 +228,7 @@ export const AudioEngine: React.FC = () => {
             fs: 0,
             modestbranding: 1,
             playsinline: 1,
-            origin: window.location.origin,
+            enablejsapi: 1,
           },
           events: {
             onReady: () => {
@@ -239,6 +239,7 @@ export const AudioEngine: React.FC = () => {
                 ytPlayerRef.current.loadVideoById(vid);
                 const targetVol = isMuted ? 0 : Math.round(volume * 100);
                 ytPlayerRef.current.setVolume(targetVol);
+                ytPlayerRef.current.playVideo();
               }
             },
             onStateChange: (event: any) => {
@@ -262,10 +263,32 @@ export const AudioEngine: React.FC = () => {
                 nextTrack();
               }
             },
-            onError: (err: any) => {
+            onError: async (err: any) => {
               console.warn('YouTube playback error:', err);
+              // Automatic Recovery: Try resolving track to a 320 KBPS direct stream!
+              const curr = usePlayerStore.getState().currentTrack;
+              if (curr && retryCountRef.current === 0) {
+                retryCountRef.current += 1;
+                console.log(`YouTube playback error encountered, attempting recovery for: ${curr.title}`);
+                try {
+                  const resolved = await resolveTrackUrl(curr, true);
+                  if (resolved && audioRef.current) {
+                    console.log('Successfully recovered stream via alternative audio!');
+                    audioRef.current.src = resolved;
+                    audioRef.current.load();
+                    audioRef.current.play().catch(() => {});
+                    setIsLoading(false);
+                    return;
+                  }
+                } catch (recErr) {
+                  console.warn('Recovery attempt failed:', recErr);
+                }
+              }
               setIsLoading(false);
-              setError('Failed to play YouTube audio stream');
+              setError('Audio stream unavailable. Skipping to next track...');
+              setTimeout(() => {
+                nextTrack();
+              }, 1500);
             },
           },
         });
@@ -316,10 +339,11 @@ export const AudioEngine: React.FC = () => {
     // PATH A: YOUTUBE TRACK
     // ============================================
     if (isYt) {
-      // Pause and unload HTML5 audio
+      // Pause HTML5 audio and detach src without triggering error event
       if (audio) {
         audio.pause();
-        audio.src = '';
+        audio.removeAttribute('src');
+        audio.load();
       }
 
       const vid = getYouTubeVideoId(currentTrack);
@@ -332,9 +356,14 @@ export const AudioEngine: React.FC = () => {
       updateMediaSession(currentTrack);
 
       if (isYtReadyRef.current && ytPlayerRef.current?.loadVideoById) {
-        ytPlayerRef.current.loadVideoById(vid);
-        const targetVol = isMuted ? 0 : Math.round(volume * 100);
-        ytPlayerRef.current.setVolume(targetVol);
+        try {
+          ytPlayerRef.current.loadVideoById(vid);
+          const targetVol = isMuted ? 0 : Math.round(volume * 100);
+          ytPlayerRef.current.setVolume(targetVol);
+          ytPlayerRef.current.playVideo();
+        } catch (playErr) {
+          console.warn('Error playing YouTube video:', playErr);
+        }
       } else {
         pendingYtVideoIdRef.current = vid;
       }
@@ -602,6 +631,12 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handleError = async () => {
+      // CRITICAL: Ignore HTML5 audio error events if currently playing a YouTube track!
+      const activeTrack = usePlayerStore.getState().currentTrack;
+      if (isYouTubeTrack(activeTrack)) {
+        return;
+      }
+
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
@@ -688,6 +723,7 @@ export const AudioEngine: React.FC = () => {
     isPlaying,
     isMuted,
     volume,
+    isYouTubeTrack,
   ]);
 
   return (
@@ -708,18 +744,21 @@ export const AudioEngine: React.FC = () => {
         aria-hidden="true"
       />
       <div
-        id="imusic-yt-iframe"
+        id="imusic-yt-container"
         style={{
           position: 'fixed',
-          top: '-9999px',
-          left: '-9999px',
+          bottom: '0px',
+          right: '0px',
           width: '200px',
           height: '200px',
           opacity: 0.001,
           pointerEvents: 'none',
+          zIndex: -1,
         }}
         aria-hidden="true"
-      />
+      >
+        <div id="imusic-yt-iframe" style={{ width: '100%', height: '100%' }} />
+      </div>
     </>
   );
 };
