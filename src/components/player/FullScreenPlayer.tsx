@@ -17,14 +17,12 @@ import {
   Heart,
   ListMusic,
   Mic2,
-  Volume2,
-  Volume1,
-  VolumeX,
   Trash2,
   ArrowUp,
   ArrowDown,
   Music2,
 } from 'lucide-react';
+import { extractAmbientColors, getFallbackPalette, type AmbientPalette } from '@/lib/colorExtractor';
 import styles from './FullScreenPlayer.module.css';
 
 export const FullScreenPlayer: React.FC = () => {
@@ -33,8 +31,6 @@ export const FullScreenPlayer: React.FC = () => {
     isPlaying,
     currentTime,
     duration,
-    volume,
-    isMuted,
     shuffle,
     repeatMode,
     queue,
@@ -45,8 +41,6 @@ export const FullScreenPlayer: React.FC = () => {
     nextTrack,
     previousTrack,
     seek,
-    setVolume,
-    toggleMute,
     toggleShuffle,
     cycleRepeat,
     removeFromQueue,
@@ -61,15 +55,27 @@ export const FullScreenPlayer: React.FC = () => {
   const [isFav, setIsFav] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
+  const [palette, setPalette] = useState<AmbientPalette>(() =>
+    getFallbackPalette(currentTrack?.title || 'imusic')
+  );
   const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
 
-  const isIOS = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return (
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
-    );
-  }, []);
+  useEffect(() => {
+    if (!currentTrack) return;
+    let active = true;
+    const artUrl = currentTrack.album?.coverImage || '/icons/default-artwork.png';
+    const seed = `${currentTrack.title} ${currentTrack.artists?.[0]?.name || ''}`;
+
+    extractAmbientColors(artUrl, seed).then((p) => {
+      if (active) {
+        setPalette(p);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [currentTrack?.id, currentTrack?.album?.coverImage, currentTrack?.title]);
 
   useEffect(() => {
     setMounted(true);
@@ -163,12 +169,25 @@ export const FullScreenPlayer: React.FC = () => {
   const remainingTime = Math.max(0, (duration || 0) - (isSeeking ? seekValue : currentTime));
 
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Now Playing Full Screen">
-      {/* Blurred artwork backdrop */}
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Now Playing Full Screen"
+      style={{
+        '--ambient-primary': palette.primary,
+        '--ambient-secondary': palette.secondary,
+        '--ambient-glow-1': palette.glow1,
+        '--ambient-glow-2': palette.glow2,
+        '--ambient-dark-bg': palette.darkBg,
+      } as React.CSSProperties}
+    >
+      {/* Dynamic blurred ambient color grading */}
       <div
         className={styles.backdrop}
         style={{ backgroundImage: `url(${artworkUrl})` }}
       />
+      <div className={styles.backdropMesh} />
       <div className={styles.backdropDim} />
 
       <div className={styles.container}>
@@ -325,47 +344,6 @@ export const FullScreenPlayer: React.FC = () => {
                   {repeatMode === 'one' ? <Repeat1 size={20} /> : <Repeat size={20} />}
                 </button>
               </div>
-
-              {/* Volume Slider Bar */}
-              <div className={styles.volumeRow}>
-                <button
-                  type="button"
-                  className={styles.volumeIconBtn}
-                  onClick={toggleMute}
-                  aria-label={isMuted || volume === 0 ? 'Unmute' : 'Mute'}
-                >
-                  {isMuted || volume === 0 ? (
-                    <VolumeX size={18} />
-                  ) : volume < 0.5 ? (
-                    <Volume1 size={18} />
-                  ) : (
-                    <Volume2 size={18} />
-                  )}
-                </button>
-                <div className={styles.sliderContainer}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={isMuted ? 0 : volume}
-                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                    className={styles.volumeSlider}
-                    aria-label="Volume slider"
-                    style={{
-                      background: `linear-gradient(to right, var(--text-primary) 0%, var(--text-primary) ${(isMuted ? 0 : volume) * 100}%, var(--bg-surface-3) ${(isMuted ? 0 : volume) * 100}%, var(--bg-surface-3) 100%)`,
-                    }}
-                  />
-                </div>
-                <span className={styles.volumePercentText}>
-                  {Math.round((isMuted ? 0 : volume) * 100)}%
-                </span>
-              </div>
-              {isIOS && (
-                <div className={styles.iosVolumeNotice}>
-                  Hardware volume buttons active
-                </div>
-              )}
             </div>
           )}
 

@@ -2,13 +2,14 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: var(--bg-base);
+  background: var(--ambient-dark-bg, #08080c);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
   animation: modalEnter 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.8s ease;
 }
 
 @keyframes modalEnter {
@@ -24,27 +25,47 @@
 
 .backdrop {
   position: absolute;
-  inset: -40px;
+  inset: -60px;
   background-size: cover;
   background-position: center;
-  filter: blur(60px) brightness(0.25) saturate(140%);
-  -webkit-filter: blur(60px) brightness(0.25) saturate(140%);
-  transform: scale(1.1);
+  filter: blur(80px) saturate(220%) brightness(0.65);
+  -webkit-filter: blur(80px) saturate(220%) brightness(0.65);
+  opacity: 0.5;
+  transform: scale(1.15);
   z-index: 0;
   pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+
+.backdropMesh {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 25%, var(--ambient-glow-1, rgba(140, 50, 220, 0.55)) 0%, transparent 65%),
+    radial-gradient(circle at 85% 70%, var(--ambient-glow-2, rgba(240, 80, 140, 0.45)) 0%, transparent 55%),
+    radial-gradient(circle at 15% 85%, var(--ambient-glow-1, rgba(50, 120, 240, 0.35)) 0%, transparent 50%);
+  z-index: 1;
+  pointer-events: none;
+  transition: background 0.8s ease;
 }
 
 .backdropDim {
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at center 30%, rgba(9, 9, 11, 0.4) 0%, rgba(9, 9, 11, 0.95) 100%);
-  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 8, 12, 0.25) 0%,
+    rgba(8, 8, 12, 0.5) 45%,
+    var(--ambient-dark-bg, #08080c) 100%
+  );
+  z-index: 2;
   pointer-events: none;
+  transition: background 0.8s ease;
 }
 
 .container {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -156,9 +177,11 @@
   aspect-ratio: 1 / 1;
   height: auto;
   border-radius: var(--radius-xl);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 20px 50px -10px var(--ambient-glow-1, rgba(0, 0, 0, 0.6)),
+              0 10px 30px rgba(0, 0, 0, 0.7);
   object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: box-shadow 0.8s ease;
 }
 
 /* Track Details */
@@ -280,84 +303,6 @@
 
 .playOffset {
   margin-left: 3px;
-}
-
-/* Volume */
-.volumeRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 10px;
-}
-
-.volumeIconBtn {
-  min-width: 32px;
-  min-height: 32px;
-  color: var(--text-tertiary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-full);
-  transition: color var(--transition-fast), transform var(--transition-fast);
-}
-
-.volumeIconBtn:hover {
-  color: var(--text-primary);
-}
-
-.volumeIconBtn:active {
-  transform: scale(0.9);
-}
-
-.sliderContainer {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  position: relative;
-}
-
-.volumeSlider {
-  width: 100%;
-  height: 28px;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-}
-
-.volumeSlider::-webkit-slider-runnable-track {
-  background: inherit !important;
-  height: 4px;
-  border-radius: var(--radius-full);
-}
-
-.volumeSlider::-moz-range-track {
-  background: var(--bg-surface-3);
-  height: 4px;
-  border-radius: var(--radius-full);
-}
-
-.volumeSlider::-moz-range-progress {
-  background: var(--text-primary);
-  height: 4px;
-  border-radius: var(--radius-full);
-}
-
-.volumePercentText {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  min-width: 34px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  user-select: none;
-}
-
-.iosVolumeNotice {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  text-align: center;
-  margin-top: 4px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 /* Lyrics View */

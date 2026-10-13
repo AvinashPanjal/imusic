@@ -1,11 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { decryptMediaUrl } from '@/lib/providers/IndianMusicProvider';
+import { cleanSongTitle } from '@/lib/constants/soundtracks';
 import { z } from 'zod';
 
 const ResolveSchema = z.object({
   trackId: z.string().min(1),
   preferredQuality: z.enum(['auto', 'standard', 'high', 'lossless', 'hires']).optional(),
+  title: z.string().optional(),
+  artist: z.string().optional(),
 });
+
+async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
+  const SAAVN_BASE = 'https://www.jiosaavn.com/api.php';
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+  };
+
+  let songTitle = candidateTitle || '';
+
+  // 1. Check direct song metadata
+  try {
+    const detailsUrl = `${SAAVN_BASE}?__call=song.getDetails&_format=json&_marker=0&cc=in&pids=${encodeURIComponent(rawId)}`;
+    const detailsRes = await fetch(detailsUrl, { headers }).then((r) => r.json()).catch(() => ({}));
+    const item = detailsRes[rawId];
+    if (item) {
+      songTitle = songTitle || item.song || item.title || '';
+      const directUrl = decryptMediaUrl(item.encrypted_media_url);
+      if (directUrl) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 2000);
+          const head = await fetch(directUrl, { method: 'HEAD', signal: ctrl.signal });
+          clearTimeout(timer);
+          if (head.status === 200) {
+            return { streamUrl: directUrl, title: songTitle, recovered: false };
+          }
+        } catch {
+          // Fall through to alternative recovery
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Recover working stream from alternative releases (e.g. original film album instead of 404 compilation)
+  const clean = cleanSongTitle(songTitle);
+  if (clean && clean.length >= 2) {
+    try {
+      const searchUrl = `${SAAVN_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=8&q=${encodeURIComponent(clean)}`;
+      const searchRes = await fetch(searchUrl, { headers }).then((r) => r.json()).catch(() => ({}));
+      const results = (searchRes.results || []) as any[];
+
+      for (const alt of results) {
+        if (alt.id === rawId) continue;
+        const altUrl = decryptMediaUrl(alt.encrypted_media_url);
+        if (!altUrl) continue;
+
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 2000);
+          const head = await fetch(altUrl, { method: 'HEAD', signal: ctrl.signal });
+          clearTimeout(timer);
+          if (head.status === 200) {
+            return {
+              streamUrl: altUrl,
+              title: alt.song || alt.title,
+              recovered: true,
+            };
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  return null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,7 +86,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body', details: parsed.error.issues }, { status: 400 });
     }
 
-    const { trackId, preferredQuality = 'auto' } = parsed.data;
+    const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
+
+    // Check if this is a JioSaavn external track or needs external stream recovery
+    if (trackId.startsWith('saavn-') || !trackId) {
+      const rawId = trackId.replace('saavn-', '');
+      const saavnResult = await resolveJioSaavnStream(rawId, title);
+      if (saavnResult?.streamUrl) {
+        return NextResponse.json({
+          streamUrl: saavnResult.streamUrl,
+          trackId,
+          title: saavnResult.title || title || 'Audio Track',
+          recovered: saavnResult.recovered,
+          asset: {
+            id: `saavn-asset-${rawId}`,
+            format: 'mp4',
+            codec: 'AAC',
+            bitDepth: 16,
+            sampleRate: 44100,
+            bitrate: 320,
+            isLossless: true,
+            isHiRes: false,
+          },
+        });
+      }
+    }
 
     const track = await prisma.track.findUnique({
       where: { id: trackId },
@@ -33,7 +127,28 @@ export async function POST(request: NextRequest) {
     });
 
     if (!track) {
-      return NextResponse.json({ error: 'Track not found' }, { status: 404 });
+      // Fallback: try JioSaavn recovery by track ID or title
+      const saavnResult = await resolveJioSaavnStream(trackId.replace('saavn-', ''), title);
+      if (saavnResult?.streamUrl) {
+        return NextResponse.json({
+          streamUrl: saavnResult.streamUrl,
+          trackId,
+          title: saavnResult.title || title || 'Audio Track',
+          recovered: saavnResult.recovered,
+          asset: {
+            id: `recovered-asset-${trackId}`,
+            format: 'mp4',
+            codec: 'AAC',
+            bitDepth: 16,
+            sampleRate: 44100,
+            bitrate: 320,
+            isLossless: true,
+            isHiRes: false,
+          },
+        });
+      }
+
+      return NextResponse.json({ error: 'Track not found and no playable stream available' }, { status: 404 });
     }
 
     // Record play count and history

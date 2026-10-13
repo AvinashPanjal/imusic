@@ -27,17 +27,19 @@ export const AudioEngine: React.FC = () => {
   } = usePlayerStore();
 
   // Helper to resolve playable URL
-  const resolveTrackUrl = useCallback(async (track: typeof currentTrack): Promise<string | null> => {
+  const resolveTrackUrl = useCallback(async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
     if (!track) return null;
-    if (track.streamUrl) return track.streamUrl;
+    if (track.streamUrl && !forceRefresh) return track.streamUrl;
 
-    // Check if track has an audio asset
-    const primaryAsset = track.assets?.[0];
-    if (primaryAsset) {
-      if (primaryAsset.storageType === 'remote_stream') {
-        return primaryAsset.storageKey;
+    // Check if track has an audio asset (when not forcing remote refresh)
+    if (!forceRefresh) {
+      const primaryAsset = track.assets?.[0];
+      if (primaryAsset) {
+        if (primaryAsset.storageType === 'remote_stream') {
+          return primaryAsset.storageKey;
+        }
+        return `/api/stream/${primaryAsset.id}`;
       }
-      return `/api/stream/${primaryAsset.id}`;
     }
 
     // Try resolving through the playback resolve endpoint
@@ -45,7 +47,11 @@ export const AudioEngine: React.FC = () => {
       const res = await fetch('/api/playback/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: track.id }),
+        body: JSON.stringify({
+          trackId: track.id,
+          title: track.title,
+          artist: track.artists?.[0]?.name,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -349,22 +355,31 @@ export const AudioEngine: React.FC = () => {
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
-      // Attempt single retry recovery if URL expired
+      // Attempt single retry recovery if URL expired or broken 404 compilation release
       if (retryCountRef.current === 0 && currentTrack) {
         retryCountRef.current += 1;
-        console.log('Attempting stream recovery...');
-        const newUrl = await resolveTrackUrl(currentTrack);
+        console.log('Attempting stream recovery for track:', currentTrack.title);
+        setIsLoading(true);
+        const newUrl = await resolveTrackUrl(currentTrack, true);
         if (newUrl && newUrl !== audio.src) {
+          console.log('Recovered alternative stream URL:', newUrl);
+          // Update track in player store so subsequent plays/seeks use this working URL
+          usePlayerStore.setState({
+            currentTrack: { ...currentTrack, streamUrl: newUrl },
+          });
           audio.src = newUrl;
           audio.load();
-          if (isPlaying) {
-            audio.play().catch(() => {});
+          if (usePlayerStore.getState().isPlaying) {
+            audio.play().catch((err) => console.warn('Retry play error:', err));
           }
           return;
         }
       }
 
-      setError('Audio stream failed to load. Please check connection or source.');
+      setError('Audio stream unavailable. Playing next track...');
+      setTimeout(() => {
+        nextTrack();
+      }, 1500);
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
