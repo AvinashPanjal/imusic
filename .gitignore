@@ -44,3 +44,4 @@ storage/audio/*
 
 # local audio cache
 .cache/
+*-player-script.js

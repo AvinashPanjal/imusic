@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['youtubei.js', 'youtube-dl-exec'],
   experimental: {
     serverComponentsExternalPackages: ['youtubei.js', 'youtube-dl-exec'],
     outputFileTracingIncludes: {
