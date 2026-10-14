@@ -13,7 +13,11 @@ app.use(cors());
 let innertube = null;
 async function getInnertube() {
   if (innertube) return innertube;
-  innertube = await Innertube.create();
+  const options = {};
+  if (process.env.YOUTUBE_COOKIE) {
+    options.cookie = process.env.YOUTUBE_COOKIE;
+  }
+  innertube = await Innertube.create(options);
   return innertube;
 }
 
