@@ -19,6 +19,7 @@ interface ParsedTrack {
   duration?: number;
   previewUrl?: string | null;
   coverImage?: string | null;
+  videoId?: string;
 }
 
 interface ParsedPlaylist {
@@ -74,7 +75,7 @@ function isGoodTitleMatch(requestedTitle: string, candidateSong: string): boolea
   return matchCount >= Math.min(2, reqWords.length);
 }
 
-// 1. Fetch via Official Spotify Web API with Client Credentials (supports 200+ songs pagination)
+// 1. Fetch via Official Spotify Web API with Client Credentials (supports albums and official catalogue pagination)
 async function fetchOfficialSpotifyPlaylist(
   id: string,
   isAlbum: boolean,
@@ -100,34 +101,44 @@ async function fetchOfficialSpotifyPlaylist(
     const { access_token } = await tokenRes.json();
     const endpointType = isAlbum ? 'albums' : 'playlists';
 
+    let playlistName = isAlbum ? 'Imported Spotify Album' : 'Imported Spotify Playlist';
+    let description = 'Imported from Spotify';
+    let coverImage: string | null = null;
+    let totalExpected: number | undefined;
+
+    // Fetch entity metadata
     const metaRes = await fetch(`https://api.spotify.com/v1/${endpointType}/${id}`, {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
-    if (!metaRes.ok) return null;
-    const meta = await metaRes.json();
-    const playlistName = meta.name || (isAlbum ? 'Imported Spotify Album' : 'Imported Spotify Playlist');
-    const description = meta.description || `Imported from Spotify • ${meta.owner?.display_name || ''}`;
-    const coverImage = meta.images?.[0]?.url || null;
-    const totalExpected = isAlbum ? meta.total_tracks : meta.tracks?.total;
+    if (metaRes.ok) {
+      const meta = await metaRes.json();
+      playlistName = meta.name || playlistName;
+      description = meta.description || `Imported from Spotify • ${meta.owner?.display_name || ''}`;
+      coverImage = meta.images?.[0]?.url || null;
+      totalExpected = isAlbum ? meta.total_tracks : meta.tracks?.total;
+    } else {
+      console.warn(`Spotify API ${endpointType} metadata returned status ${metaRes.status}. (Note: Spotify blocks Client Credentials on user-created playlists).`);
+    }
 
     const allTracks: ParsedTrack[] = [];
-    let offset = 0;
-    const limit = 100;
-    let hasMore = true;
+    let nextUrl: string | null = isAlbum
+      ? `https://api.spotify.com/v1/albums/${id}/tracks?limit=50&offset=0`
+      : `https://api.spotify.com/v1/playlists/${id}/tracks?limit=100&offset=0`;
 
-    while (hasMore && allTracks.length < 500) {
-      const pageUrl = isAlbum
-        ? `https://api.spotify.com/v1/albums/${id}/tracks?limit=${limit}&offset=${offset}`
-        : `https://api.spotify.com/v1/playlists/${id}/tracks?limit=${limit}&offset=${offset}&fields=items(track(name,artists(name),duration_ms,album(name,images))),next,total`;
-
-      const pageRes = await fetch(pageUrl, {
+    while (nextUrl && allTracks.length < 500) {
+      const pageRes: Response = await fetch(nextUrl, {
         headers: { Authorization: `Bearer ${access_token}` },
       });
 
-      if (!pageRes.ok) break;
-      const pageData = await pageRes.json();
+      if (!pageRes.ok) {
+        console.warn(`Spotify track page failed with status ${pageRes.status}:`, await pageRes.text().catch(() => ''));
+        break;
+      }
+
+      const pageData: any = await pageRes.json();
       const items = pageData.items || [];
+      if (items.length === 0) break;
 
       for (const item of items) {
         const t = isAlbum ? item : item.track;
@@ -140,12 +151,10 @@ async function fetchOfficialSpotifyPlaylist(
         });
       }
 
-      if (pageData.next && items.length === limit) {
-        offset += limit;
-      } else {
-        hasMore = false;
-      }
+      nextUrl = pageData.next || null;
     }
+
+    if (allTracks.length === 0) return null;
 
     return {
       title: playlistName,
@@ -296,15 +305,255 @@ async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null
   }
 }
 
-// 4. Fallback: Parse Plain Text Tracklist (e.g. "Song Name - Artist Name" or pasted list)
-function parseRawTracklist(text: string): ParsedPlaylist {
+// 4. Batch resolve Spotify Track IDs (works 100% with Client Credentials as public catalog items)
+async function resolveSpotifyTrackIds(
+  trackIds: string[],
+  clientId?: string,
+  clientSecret?: string
+): Promise<ParsedTrack[]> {
+  const tracks: ParsedTrack[] = [];
+
+  // Try Spotify official Web API if credentials are provided
+  if (clientId && clientSecret) {
+    try {
+      const authString = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${authString}`,
+        },
+        body: 'grant_type=client_credentials',
+      });
+
+      if (tokenRes.ok) {
+        const { access_token } = await tokenRes.json();
+        // Batch in groups of 50 (Spotify limit per request)
+        const CHUNK_SIZE = 50;
+        for (let i = 0; i < trackIds.length; i += CHUNK_SIZE) {
+          const chunk = trackIds.slice(i, i + CHUNK_SIZE);
+          const tracksRes = await fetch(`https://api.spotify.com/v1/tracks?ids=${chunk.join(',')}`, {
+            headers: { Authorization: `Bearer ${access_token}` },
+          });
+
+          if (tracksRes.ok) {
+            const data = await tracksRes.json();
+            for (const t of data.tracks || []) {
+              if (!t || !t.name) continue;
+              tracks.push({
+                title: t.name,
+                artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : 'Unknown Artist',
+                duration: t.duration_ms ? Math.round(t.duration_ms / 1000) : 180,
+                coverImage: t.album?.images?.[0]?.url || null,
+              });
+            }
+          }
+        }
+
+        if (tracks.length > 0) return tracks;
+      }
+    } catch (err) {
+      console.warn('Error batch resolving Spotify track IDs with API:', err);
+    }
+  }
+
+  // Fallback: oEmbed concurrent resolution (up to 10 at a time)
+  const CONCURRENCY = 10;
+  for (let i = 0; i < trackIds.length; i += CONCURRENCY) {
+    const chunk = trackIds.slice(i, i + CONCURRENCY);
+    const resolvedChunk = await Promise.all(
+      chunk.map(async (id) => {
+        try {
+          const oRes = await fetch(`https://open.spotify.com/oembed?url=https://open.spotify.com/track/${id}`);
+          if (oRes.ok) {
+            const oData = await oRes.json();
+            return {
+              title: oData.title || 'Unknown Track',
+              artist: 'Various Artists',
+              duration: 180,
+              coverImage: oData.thumbnail_url || null,
+            };
+          }
+        } catch {}
+        return null;
+      })
+    );
+    for (const t of resolvedChunk) {
+      if (t) tracks.push(t);
+    }
+  }
+
+  return tracks;
+}
+
+// 5. Fetch & Parse YouTube Playlists (no 100-track restrictions)
+async function fetchYouTubePlaylist(playlistUrl: string): Promise<ParsedPlaylist | null> {
+  const match = playlistUrl.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+  if (!match) return null;
+  const listId = match[1];
+
+  try {
+    const res = await fetch(`https://www.youtube.com/playlist?list=${listId}`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const m =
+      html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/) ||
+      html.match(/ytInitialData\s*=\s*({[\s\S]*?});/);
+    if (!m) return null;
+
+    const data = JSON.parse(m[1]);
+    const title = data.metadata?.playlistMetadataRenderer?.title || 'YouTube Playlist';
+    const description = data.metadata?.playlistMetadataRenderer?.description || 'Imported from YouTube';
+
+    const tracks: ParsedTrack[] = [];
+    const sec = data.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents;
+    const items = sec?.[0]?.itemSectionRenderer?.contents || [];
+
+    for (const it of items) {
+      if (it.lockupViewModel) {
+        const lvm = it.lockupViewModel;
+        const watchEp = lvm.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint;
+        const videoId = watchEp?.videoId;
+        const rawLabel = lvm.rendererContext?.accessibilityContext?.label || '';
+        const cleanTitle = rawLabel
+          .replace(/\s+\d+\s+minutes?.*$/i, '')
+          .replace(/\s+\d+\s+seconds?.*$/i, '')
+          .trim();
+        const thumbnail = lvm.contentImage?.thumbnailViewModel?.image?.sources?.[0]?.url;
+
+        if (cleanTitle) {
+          tracks.push({
+            title: cleanTitle,
+            artist: 'YouTube Creator',
+            coverImage: thumbnail,
+            duration: 180,
+            videoId,
+          });
+        }
+      } else if (it.playlistVideoRenderer) {
+        const pvr = it.playlistVideoRenderer;
+        const videoId = pvr.videoId;
+        const rawTitle = pvr.title?.runs?.[0]?.text || pvr.title?.simpleText || 'Unknown Video';
+        const channel = pvr.shortBylineText?.runs?.[0]?.text || 'YouTube Creator';
+        const thumbnail = pvr.thumbnail?.thumbnails?.[0]?.url;
+
+        tracks.push({
+          title: rawTitle,
+          artist: channel,
+          coverImage: thumbnail,
+          duration: 180,
+          videoId,
+        });
+      }
+    }
+
+    if (tracks.length === 0) return null;
+
+    return {
+      title,
+      description,
+      coverImage: tracks[0]?.coverImage || null,
+      tracks,
+      totalExpected: tracks.length,
+    };
+  } catch (err) {
+    console.warn('Error fetching YouTube playlist:', err);
+    return null;
+  }
+}
+
+// 6. Universal Tracklist Parser: CSV, Spotify Track URLs, or Plain Text
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"' && (i === 0 || line[i - 1] !== '\\')) {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result.map((s) => s.replace(/^"|"$/g, '').trim());
+}
+
+async function parseUniversalTracklist(
+  text: string,
+  clientId?: string,
+  clientSecret?: string
+): Promise<ParsedPlaylist> {
+  // 1. Detect Spotify Track URLs (e.g. copied from Spotify Desktop via Ctrl+A -> Ctrl+C)
+  const spotifyTrackMatches = [...text.matchAll(/(?:spotify:track:|open\.spotify\.com\/track\/)([a-zA-Z0-9]{22})/g)];
+  if (spotifyTrackMatches.length > 0) {
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const m of spotifyTrackMatches) {
+      if (!seen.has(m[1])) {
+        seen.add(m[1]);
+        ids.push(m[1]);
+      }
+    }
+    const resolved = await resolveSpotifyTrackIds(ids.slice(0, 500), clientId, clientSecret);
+    return {
+      title: 'Imported Spotify Tracks',
+      description: `Imported ${resolved.length} Spotify tracks directly`,
+      tracks: resolved,
+      totalExpected: resolved.length,
+    };
+  }
+
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('#'));
 
-  const tracks: ParsedTrack[] = [];
+  // 2. Detect CSV with header (Exportify, TuneMyMusic, etc.)
+  if (lines.length > 1 && lines[0].includes(',')) {
+    const firstLineCols = parseCsvLine(lines[0]).map((c) => c.toLowerCase());
+    const trackIdx = firstLineCols.findIndex((c) =>
+      c === 'track name' || c === 'title' || c === 'song' || c === 'name' || c.includes('track')
+    );
+    const artistIdx = firstLineCols.findIndex((c) =>
+      c.includes('artist') || c.includes('singer') || c.includes('byline')
+    );
 
+    if (trackIdx !== -1) {
+      const parsed: ParsedTrack[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCsvLine(lines[i]);
+        if (cols.length > trackIdx && cols[trackIdx]) {
+          parsed.push({
+            title: cols[trackIdx],
+            artist: artistIdx !== -1 && cols[artistIdx] ? cols[artistIdx] : 'Unknown Artist',
+            duration: 180,
+          });
+        }
+      }
+      if (parsed.length > 0) {
+        return {
+          title: 'Imported CSV Playlist',
+          description: `Imported ${parsed.length} tracks from CSV file`,
+          tracks: parsed,
+          totalExpected: parsed.length,
+        };
+      }
+    }
+  }
+
+  // 3. Fallback: Parse line-by-line tracklist
+  const tracks: ParsedTrack[] = [];
   for (const line of lines) {
     const cleaned = line.replace(/^\d+[\.\-\s)]+/, '').trim();
     if (!cleaned) continue;
@@ -451,26 +700,29 @@ export async function POST(request: NextRequest) {
 
     const { url, customTitle } = parsed.data;
 
+    const clientId = process.env.SPOTIFY_CLIENT_ID;
+    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+
     let parsedPlaylist: ParsedPlaylist | null = null;
 
-    if (url.includes('spotify.com') || url.includes('spotify.link') || url.startsWith('spotify:')) {
+    if (
+      (url.includes('spotify.com/playlist') || url.includes('spotify.com/album') || url.includes('spotify.link') || url.startsWith('spotify:playlist') || url.startsWith('spotify:album')) &&
+      !url.includes('/track/')
+    ) {
       parsedPlaylist = await fetchSpotifyPlaylist(url);
+    } else if (url.includes('youtube.com/playlist') || url.includes('music.youtube.com/playlist')) {
+      parsedPlaylist = await fetchYouTubePlaylist(url);
     } else if (url.includes('jiosaavn.com')) {
       parsedPlaylist = await fetchJioSaavnPlaylist(url);
-    }
-
-    // Fallback: plain text list of songs
-    if (!parsedPlaylist || parsedPlaylist.tracks.length === 0) {
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        parsedPlaylist = parseRawTracklist(url);
-      }
+    } else {
+      parsedPlaylist = await parseUniversalTracklist(url, clientId, clientSecret);
     }
 
     if (!parsedPlaylist || parsedPlaylist.tracks.length === 0) {
       return NextResponse.json(
         {
           error:
-            'Could not extract songs from this Spotify link. Please ensure the playlist is Public (not Private) in Spotify, or paste the song titles directly.',
+            'Could not extract songs from this link or text. Please ensure Spotify/YouTube links are Public, or paste song titles / Spotify track links directly.',
         },
         { status: 400 }
       );
@@ -481,19 +733,31 @@ export async function POST(request: NextRequest) {
     let playlistFirstCover: string | null = parsedPlaylist.coverImage || null;
     let matchedCount = 0;
 
-    // Process up to 300 tracks (removed arbitrary 50 limit)
-    const tracksToProcess = parsedPlaylist.tracks.slice(0, 300);
+    // Process up to 500 tracks
+    const tracksToProcess = parsedPlaylist.tracks.slice(0, 500);
     const fullTracks: TrackData[] = [];
 
-    // Concurrent batch processing (8 songs in parallel for high speed)
-    const BATCH_SIZE = 8;
+    // Concurrent batch processing (10 songs in parallel for high speed)
+    const BATCH_SIZE = 10;
     for (let i = 0; i < tracksToProcess.length; i += BATCH_SIZE) {
       const chunk = tracksToProcess.slice(i, i + BATCH_SIZE);
       const chunkResults = await Promise.all(
         chunk.map(async (item, chunkOffset) => {
           const globalIdx = i + chunkOffset;
           try {
-            const match = await matchPlayableStream(item.title, item.artist);
+            const match = item.videoId
+              ? {
+                  streamUrl: `/api/stream/yt?v=${item.videoId}`,
+                  matchedTitle: item.title,
+                  matchedArtist: item.artist,
+                  albumTitle: `${item.title} - Single`,
+                  coverImage: item.coverImage || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+                  duration: item.duration || 180,
+                  year: new Date().getFullYear(),
+                  genre: 'YouTube Music',
+                  providerCode: 'youtube',
+                }
+              : await matchPlayableStream(item.title, item.artist);
 
             const trackTitle = match?.matchedTitle || item.title;
             const artistName = match?.matchedArtist || item.artist || 'Unknown Artist';
@@ -534,7 +798,7 @@ export async function POST(request: NextRequest) {
                   ]
                 : [],
               streamUrl: streamUrl || undefined,
-              providerCode: 'saavn',
+              providerCode: (match?.providerCode as any) || (item.videoId ? 'youtube' : 'saavn'),
             };
 
             return { trackObj, streamUrl, coverImage };
@@ -698,8 +962,7 @@ export async function POST(request: NextRequest) {
 
     const isEmbedLimited =
       parsedPlaylist.tracks.length === 100 &&
-      !process.env.SPOTIFY_CLIENT_ID &&
-      (url.includes('spotify.com') || url.includes('spotify.link'));
+      (url.includes('spotify.com/playlist') || url.includes('spotify.link') || url.startsWith('spotify:playlist'));
 
     return NextResponse.json({
       success: true,

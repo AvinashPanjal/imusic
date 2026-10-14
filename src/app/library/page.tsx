@@ -25,6 +25,8 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  Upload,
+  FileText,
 } from 'lucide-react';
 import styles from './library.module.css';
 
@@ -48,9 +50,11 @@ export default function LibraryPage() {
 
   // Import Playlist Modal State
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importMode, setImportMode] = useState<'url' | 'raw'>('url');
+  const [importMode, setImportMode] = useState<'url' | 'raw' | 'file'>('url');
   const [importUrl, setImportUrl] = useState('');
   const [importCustomTitle, setImportCustomTitle] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatusText, setImportStatusText] = useState('');
   const [importResult, setImportResult] = useState<{
@@ -62,6 +66,23 @@ export default function LibraryPage() {
     isEmbedLimited?: boolean;
     error?: string;
   } | null>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setImportUrl(text);
+        if (!importCustomTitle) {
+          setImportCustomTitle(file.name.replace(/\.[^/.]+$/, ''));
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const [loading, setLoading] = useState(true);
 
@@ -585,7 +606,15 @@ export default function LibraryPage() {
                     </p>
                     {importResult.isEmbedLimited && (
                       <div className={styles.infoBanner}>
-                        💡 <strong>100 Tracks Imported</strong>: Spotify&rsquo;s public web embed returns up to 100 songs for free. If your playlist has 200+ songs, switch to &ldquo;Paste Song List&rdquo; tab to paste the remaining titles, or set <code>SPOTIFY_CLIENT_ID</code> in <code>.env</code>.
+                        ℹ️ <strong>100 Tracks Imported (Spotify&rsquo;s Public Limit)</strong>: Spotify&rsquo;s servers strictly cap public playlist preview links at 100 songs.
+                        <br /><br />
+                        <strong>To import all 200–500+ songs in 10 seconds:</strong>
+                        <div style={{ marginTop: '6px' }}>
+                          1. In <strong>Spotify Desktop / Web</strong>: Open playlist &rarr; Click any song &rarr; Press <code>Ctrl+A</code> (or <code>Cmd+A</code>) &rarr; Press <code>Ctrl+C</code>.
+                        </div>
+                        <div style={{ marginTop: '4px' }}>
+                          2. Switch to <strong>&ldquo;Paste Songs / Links&rdquo;</strong> tab above, paste the copied links, and click Import!
+                        </div>
                       </div>
                     )}
                     <button
@@ -612,7 +641,7 @@ export default function LibraryPage() {
                 onClick={() => setImportMode('url')}
                 disabled={isImporting}
               >
-                Spotify / Web Link
+                Playlist Link
               </button>
               <button
                 type="button"
@@ -620,36 +649,81 @@ export default function LibraryPage() {
                 onClick={() => setImportMode('raw')}
                 disabled={isImporting}
               >
-                Paste Song List (200+ Songs)
+                Paste Songs / Links
+              </button>
+              <button
+                type="button"
+                className={`${styles.importModeTab} ${importMode === 'file' ? styles.importModeTabActive : ''}`}
+                onClick={() => {
+                  setImportMode('file');
+                  fileInputRef.current?.click();
+                }}
+                disabled={isImporting}
+              >
+                Upload File (.csv)
               </button>
             </div>
 
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv,.txt"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+
             <form onSubmit={handleImportPlaylist} className={styles.modalForm}>
-              {importMode === 'url' ? (
+              {importMode === 'url' && (
                 <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Spotify Playlist Link or JioSaavn Link</label>
+                  <label className={styles.fieldLabel}>Spotify, YouTube, or JioSaavn Playlist Link</label>
                   <input
                     type="text"
-                    placeholder="https://open.spotify.com/playlist/..."
+                    placeholder="https://open.spotify.com/playlist/... or YouTube playlist"
                     value={importUrl}
                     onChange={(e) => setImportUrl(e.target.value)}
                     disabled={isImporting}
                     required
                     className={styles.modalInput}
                   />
+                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                    💡 Note: Direct Spotify links are capped at 100 tracks by Spotify. For 100+ songs, switch to &ldquo;Paste Songs / Links&rdquo;!
+                  </span>
                 </div>
-              ) : (
+              )}
+
+              {importMode === 'raw' && (
                 <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Paste Song Names (One per line)</label>
+                  <label className={styles.fieldLabel}>Paste Spotify Track Links or Song Titles (Up to 500 Songs)</label>
                   <textarea
-                    placeholder="Rasathi Unnai - P. Jayachandran&#10;Pehle Bhi Main - Vishal Mishra&#10;Melliname - Harish Raghavendra"
+                    placeholder="Paste Spotify track links (Ctrl+A & Ctrl+C from Spotify Desktop):&#10;https://open.spotify.com/track/...&#10;https://open.spotify.com/track/...&#10;&#10;OR paste song titles:&#10;Rasathi Unnai - P. Jayachandran&#10;Pehle Bhi Main - Vishal Mishra"
                     value={importUrl}
                     onChange={(e) => setImportUrl(e.target.value)}
                     disabled={isImporting}
                     required
-                    rows={5}
+                    rows={6}
                     className={styles.modalTextarea}
                   />
+                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                    🔥 Quick tip: In Spotify Desktop / Web, open your playlist &rarr; Press <code>Ctrl+A</code> &rarr; <code>Ctrl+C</code> &rarr; paste here!
+                  </span>
+                </div>
+              )}
+
+              {importMode === 'file' && (
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>Upload Playlist Export File (.csv or .txt)</label>
+                  <div
+                    className={styles.fileDropZone}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={24} style={{ color: 'var(--accent-hover)' }} />
+                    <div className={styles.fileDropZoneText}>
+                      {uploadedFileName ? `Selected: ${uploadedFileName}` : 'Click to select CSV or TXT file'}
+                    </div>
+                    <div className={styles.fileDropZoneSub}>
+                      {importUrl ? `${importUrl.split('\n').filter(Boolean).length} tracks ready to import` : 'Supports Exportify, TuneMyMusic, Soundiiz, or text lists'}
+                    </div>
+                  </div>
                 </div>
               )}
 
