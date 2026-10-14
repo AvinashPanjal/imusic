@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptMediaUrl, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
 import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
+import {
+  cleanSongTitle,
+  isAccurateTitleMatch,
+  isArtistCompatible,
+  selectBestYouTubeCandidate,
+  parseTrackDuration,
+} from '@/lib/trackMatching';
 import { TrackData, PlaylistData } from '@/types/music';
 import { z } from 'zod';
 
@@ -16,6 +23,7 @@ const ImportPlaylistSchema = z.object({
 interface ParsedTrack {
   title: string;
   artist: string;
+  album?: string;
   duration?: number;
   previewUrl?: string | null;
   coverImage?: string | null;
@@ -28,51 +36,6 @@ interface ParsedPlaylist {
   coverImage?: string | null;
   tracks: ParsedTrack[];
   totalExpected?: number;
-}
-
-function cleanTrackTitle(title: string): string {
-  if (!title) return '';
-  return title
-    .replace(/\s*\(From\s+[^)]+\)/gi, '')
-    .replace(/\s*\[From\s+[^\]]+\]/gi, '')
-    .replace(/\s*-\s*From\s+.*$/gi, '')
-    .replace(/\s*\(Remastered[^)]*\)/gi, '')
-    .replace(/\s*\[Remastered[^\]]*\]/gi, '')
-    .replace(/\s*\(Original[^)]*\)/gi, '')
-    .replace(/\s*\(Duet[^)]*\)/gi, '')
-    .replace(/\s*\(feat\.[^)]*\)/gi, '')
-    .replace(/\s*\[feat\.[^\]]*\]/gi, '')
-    .trim();
-}
-
-function isGoodTitleMatch(requestedTitle: string, candidateSong: string): boolean {
-  if (!requestedTitle || !candidateSong) return false;
-  const reqClean = cleanTrackTitle(requestedTitle).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-  const candClean = cleanTrackTitle(candidateSong).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-
-  const reqWords = reqClean.split(/\s+/).filter((w) => w.length > 2);
-  const candWords = candClean.split(/\s+/).filter((w) => w.length > 2);
-
-  if (reqWords.length === 0 || candWords.length === 0) return false;
-
-  const genericWords = new Set(['the', 'and', 'from', 'song', 'audio', 'video', 'life', 'full', 'version']);
-  const reqDistinctive = reqWords.filter((w) => !genericWords.has(w));
-
-  if (reqDistinctive.length > 0) {
-    const hasDistinctiveMatch = reqDistinctive.some((w) => candClean.includes(w) || candWords.includes(w));
-    if (!hasDistinctiveMatch) {
-      return false;
-    }
-  }
-
-  let matchCount = 0;
-  for (const w of reqWords) {
-    if (candWords.includes(w) || candClean.includes(w)) {
-      matchCount++;
-    }
-  }
-
-  return matchCount >= Math.min(2, reqWords.length);
 }
 
 // 1. Fetch via Official Spotify Web API with Client Credentials (supports albums and official catalogue pagination)
@@ -146,6 +109,7 @@ async function fetchOfficialSpotifyPlaylist(
         allTracks.push({
           title: t.name,
           artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : 'Unknown Artist',
+          album: isAlbum ? playlistName : (t.album?.name || playlistName),
           duration: t.duration_ms ? Math.round(t.duration_ms / 1000) : 180,
           coverImage: t.album?.images?.[0]?.url || coverImage,
         });
@@ -225,6 +189,7 @@ async function fetchSpotifyPlaylist(rawUrl: string): Promise<ParsedPlaylist | nu
           const tracks: ParsedTrack[] = rawTracks.map((t) => ({
             title: t.title || t.name || 'Unknown Track',
             artist: t.subtitle || t.artists?.[0]?.name || 'Unknown Artist',
+            album: isAlbum ? playlistName : (t.album?.name || playlistName),
             duration: t.duration ? Math.round(t.duration / 1000) : 180,
             coverImage,
           }));
@@ -284,10 +249,12 @@ async function fetchJioSaavnPlaylist(url: string): Promise<ParsedPlaylist | null
     const data = await res.json();
     if (!data.title && !data.name) return null;
 
+    const albumTitle = decodeHtmlEntities(data.title || data.name || 'JioSaavn Album');
     const songs = (data.songs || data.list || []) as any[];
     const tracks: ParsedTrack[] = songs.map((s) => ({
       title: decodeHtmlEntities(s.song || s.title || ''),
       artist: decodeHtmlEntities(s.primary_artists || s.singers || ''),
+      album: decodeHtmlEntities(s.album || albumTitle),
       duration: s.duration ? parseInt(s.duration, 10) : 180,
       coverImage: (s.image || data.image || '').replace('150x150', '500x500'),
     }));
@@ -343,6 +310,7 @@ async function resolveSpotifyTrackIds(
               tracks.push({
                 title: t.name,
                 artist: Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : 'Unknown Artist',
+                album: t.album?.name,
                 duration: t.duration_ms ? Math.round(t.duration_ms / 1000) : 180,
                 coverImage: t.album?.images?.[0]?.url || null,
               });
@@ -517,7 +485,7 @@ async function parseUniversalTracklist(
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith('#'));
+    .filter((l) => l.length > 0 && (!l.startsWith('#') || l.includes(',')));
 
   // 2. Detect CSV with header (Exportify, TuneMyMusic, etc.)
   if (lines.length > 1 && lines[0].includes(',')) {
@@ -528,16 +496,24 @@ async function parseUniversalTracklist(
     const artistIdx = firstLineCols.findIndex((c) =>
       c.includes('artist') || c.includes('singer') || c.includes('byline')
     );
+    const albumIdx = firstLineCols.findIndex((c) =>
+      c === 'album' || c === 'album name' || c.includes('album')
+    );
+    const durationIdx = firstLineCols.findIndex((c) =>
+      c === 'duration' || c === 'duration ms' || c === 'duration_ms' || c === 'time' || c.includes('duration')
+    );
 
     if (trackIdx !== -1) {
       const parsed: ParsedTrack[] = [];
       for (let i = 1; i < lines.length; i++) {
         const cols = parseCsvLine(lines[i]);
         if (cols.length > trackIdx && cols[trackIdx]) {
+          const durationVal = durationIdx !== -1 && cols[durationIdx] ? parseTrackDuration(cols[durationIdx]) : 180;
           parsed.push({
             title: cols[trackIdx],
             artist: artistIdx !== -1 && cols[artistIdx] ? cols[artistIdx] : 'Unknown Artist',
-            duration: 180,
+            album: albumIdx !== -1 && cols[albumIdx] ? cols[albumIdx] : undefined,
+            duration: durationVal,
           });
         }
       }
@@ -591,64 +567,94 @@ async function parseUniversalTracklist(
 }
 
 // 5. Helper: Smart match track on JioSaavn (320 KBPS Studio AAC)
-async function matchPlayableStream(title: string, artist: string) {
-  const cleanTitle = cleanTrackTitle(title);
-  const primaryArtist = artist.split(/[,&]/)[0].trim();
+async function matchPlayableStream(title: string, artist: string, album?: string) {
+  const cleanTitle = cleanSongTitle(title);
+  const primaryArtist = (artist || '')
+    .split(/[,&/]/)[0]
+    .trim()
+    .replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '')
+    .trim();
+  const cleanAlbum = cleanSongTitle(album || '');
 
-  // Expanded query permutations for JioSaavn
-  const searchQueries: string[] = [
-    `${cleanTitle} ${primaryArtist}`.trim(),
-    cleanTitle,
-  ];
+  const searchQueries: string[] = [];
 
-  if (/^the\s+/i.test(cleanTitle)) {
-    searchQueries.push(cleanTitle.replace(/^the\s+/i, '').trim());
-  } else {
-    searchQueries.push(`The ${cleanTitle}`);
+  // Priority 1: Song title + Album name (Direct hit for original film soundtrack releases!)
+  if (cleanTitle && cleanAlbum && cleanAlbum.toLowerCase() !== cleanTitle.toLowerCase()) {
+    searchQueries.push(`${cleanTitle} ${cleanAlbum}`);
   }
 
-  if (cleanTitle.includes('-')) {
-    cleanTitle.split('-').forEach((p) => {
-      const pt = p.trim();
-      if (pt.length >= 2) searchQueries.push(pt);
-    });
+  // Priority 2: Song title + Primary Artist
+  if (cleanTitle && primaryArtist) {
+    searchQueries.push(`${cleanTitle} ${primaryArtist}`);
+    searchQueries.push(`${primaryArtist} ${cleanTitle}`);
   }
 
-  if (title !== cleanTitle) {
-    searchQueries.push(title);
+  // Priority 3: Song title alone
+  if (cleanTitle) {
+    searchQueries.push(cleanTitle);
   }
+
+  const SAAVN_BASE = 'https://www.jiosaavn.com/api.php';
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  };
 
   for (const q of searchQueries.slice(0, 5)) {
     if (!q) continue;
     try {
-      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=6&q=${encodeURIComponent(q)}`;
-      const res = await fetch(searchUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      });
+      const searchUrl = `${SAAVN_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=8&q=${encodeURIComponent(q)}`;
+      const res = await fetch(searchUrl, { headers });
 
       if (res.ok) {
         const data = await res.json();
         const results = (data.results || []) as any[];
 
+        // Pass 1: Accurate title match AND compatible artist
         for (const item of results) {
-          const matchesTitle = isGoodTitleMatch(cleanTitle, item.song || item.title || '');
-
-          if (matchesTitle && item.encrypted_media_url) {
+          const itemSong = item.song || item.title || '';
+          const itemArtist = item.primary_artists || item.singers || '';
+          if (
+            isAccurateTitleMatch(cleanTitle, itemSong) &&
+            isArtistCompatible(artist, itemArtist) &&
+            item.encrypted_media_url
+          ) {
             let streamUrl = decryptMediaUrl(item.encrypted_media_url);
             if (streamUrl) {
-              // Upgrade to highest quality 320 KBPS AAC stream
               streamUrl = streamUrl
                 .replace(/_96\.(mp4|m4a)/i, '_320.$1')
                 .replace(/_160\.(mp4|m4a)/i, '_320.$1');
 
               return {
                 streamUrl,
-                matchedTitle: decodeHtmlEntities(item.song || item.title || title),
+                matchedTitle: decodeHtmlEntities(itemSong || title),
+                matchedArtist: decodeHtmlEntities(itemArtist || artist),
+                albumTitle: decodeHtmlEntities(item.album || album || `${title} - Single`),
+                coverImage: (item.image || '').replace('150x150', '500x500'),
+                duration: item.duration ? parseInt(item.duration, 10) : 180,
+                year: item.year ? parseInt(item.year, 10) : undefined,
+                genre: item.language || 'Music',
+                providerCode: 'saavn',
+              };
+            }
+          }
+        }
+
+        // Pass 2: Accurate title match
+        for (const item of results) {
+          const itemSong = item.song || item.title || '';
+          if (isAccurateTitleMatch(cleanTitle, itemSong) && item.encrypted_media_url) {
+            let streamUrl = decryptMediaUrl(item.encrypted_media_url);
+            if (streamUrl) {
+              streamUrl = streamUrl
+                .replace(/_96\.(mp4|m4a)/i, '_320.$1')
+                .replace(/_160\.(mp4|m4a)/i, '_320.$1');
+
+              return {
+                streamUrl,
+                matchedTitle: decodeHtmlEntities(itemSong || title),
                 matchedArtist: decodeHtmlEntities(item.primary_artists || item.singers || artist),
-                albumTitle: decodeHtmlEntities(item.album || `${title} - Single`),
+                albumTitle: decodeHtmlEntities(item.album || album || `${title} - Single`),
                 coverImage: (item.image || '').replace('150x150', '500x500'),
                 duration: item.duration ? parseInt(item.duration, 10) : 180,
                 year: item.year ? parseInt(item.year, 10) : undefined,
@@ -664,18 +670,18 @@ async function matchPlayableStream(title: string, artist: string) {
     }
   }
 
-  // Fallback to YouTube for full-length native audio stream (100% background playback!)
+  // Fallback to YouTube with verified candidate selection
   try {
     const ytQuery = `${cleanTitle} ${primaryArtist}`.trim() || title;
-    const ytVideos = await searchYouTubeVideos(ytQuery, 1);
-    if (ytVideos.length > 0 && ytVideos[0].id) {
-      const topYt = ytVideos[0];
+    const ytVideos = await searchYouTubeVideos(ytQuery, 6);
+    const best = selectBestYouTubeCandidate(cleanTitle, artist, ytVideos);
+    if (best?.id) {
       return {
-        streamUrl: `/api/stream/yt?v=${topYt.id}`,
-        matchedTitle: topYt.title,
-        matchedArtist: topYt.channel || artist,
-        albumTitle: `${title} - Single`,
-        coverImage: topYt.thumbnail,
+        streamUrl: `/api/stream/yt?v=${best.id}`,
+        matchedTitle: best.title || title,
+        matchedArtist: best.channel || artist,
+        albumTitle: album || `${title} - Single`,
+        coverImage: best.thumbnail,
         duration: 180,
         year: new Date().getFullYear(),
         genre: 'YouTube Music',
@@ -743,7 +749,7 @@ export async function POST(request: NextRequest) {
       tracksToProcess.slice(0, 2).map(async (item) => {
         if (item.videoId) return null;
         try {
-          const matchPromise = matchPlayableStream(item.title, item.artist);
+          const matchPromise = matchPlayableStream(item.title, item.artist, item.album);
           const matchTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800));
           return await Promise.race([matchPromise, matchTimeout]);
         } catch {
@@ -759,7 +765,7 @@ export async function POST(request: NextRequest) {
       let coverImage = item.coverImage || '/icons/default-artwork.png';
       let trackTitle = item.title;
       let artistName = item.artist || 'Unknown Artist';
-      let albumName = `${trackTitle} - Single`;
+      let albumName = item.album || `${trackTitle} - Single`;
       let duration = item.duration || 180;
       let providerCode: any = 'saavn';
 
@@ -770,9 +776,6 @@ export async function POST(request: NextRequest) {
         matchedCount++;
       } else if (i < preMatches.length && preMatches[i]) {
         const match = preMatches[i]!;
-        trackTitle = match.matchedTitle || trackTitle;
-        artistName = match.matchedArtist || artistName;
-        albumName = match.albumTitle || albumName;
         coverImage = match.coverImage || coverImage;
         streamUrl = match.streamUrl || '';
         duration = match.duration || duration;

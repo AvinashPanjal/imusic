@@ -62,7 +62,13 @@ export class OfflineDownloadManager {
       const res = await fetch('/api/playback/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: track.id, preferredQuality: 'lossless' }),
+        body: JSON.stringify({
+          trackId: track.id,
+          title: track.title,
+          artist: track.artists?.[0]?.name,
+          album: track.album?.title,
+          preferredQuality: 'lossless',
+        }),
       });
       if (!res.ok) throw new Error('Could not resolve download stream');
       const data = await res.json();

@@ -449,6 +449,7 @@ export const AudioEngine: React.FC = () => {
             trackId: track.id,
             title: track.title,
             artist: track.artists?.[0]?.name,
+            album: track.album?.title,
           }),
         });
         if (res.ok) {
