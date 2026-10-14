@@ -10,6 +10,18 @@ declare global {
   }
 }
 
+// Override Page Visibility API so YouTube's embedded player script does not detect app backgrounding/locking
+if (typeof document !== 'undefined') {
+  try {
+    Object.defineProperties(document, {
+      hidden: { value: false, writable: true, configurable: true },
+      visibilityState: { value: 'visible', writable: true, configurable: true },
+      webkitHidden: { value: false, writable: true, configurable: true },
+      webkitVisibilityState: { value: 'visible', writable: true, configurable: true },
+    });
+  } catch {}
+}
+
 const SILENT_AUDIO = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A/w==';
 
 function extractYouTubeId(track: any): string | null {
@@ -45,6 +57,7 @@ const isVercelEnvironment = (): boolean => {
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ytPlayerRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const isYtModeRef = useRef<boolean>(false);
   const isYtReadyRef = useRef<boolean>(false);
   const pendingYtVideoIdRef = useRef<string | null>(null);
@@ -69,6 +82,28 @@ export const AudioEngine: React.FC = () => {
     setNetworkInterrupted,
     updatePlaybackProgress,
   } = usePlayerStore();
+
+  // Keep Web Audio hardware context active in the background
+  const ensureAudioContext = useCallback(() => {
+    try {
+      if (!audioContextRef.current && typeof window !== 'undefined') {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          gain.gain.value = 0.0001; // Inaudible
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          audioContextRef.current = ctx;
+        }
+      }
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+    } catch {}
+  }, []);
 
   // Helper to update Media Session API for Lock Screen & Dynamic Island (iOS, Android, macOS, Windows)
   const updateMediaSession = useCallback(
@@ -106,8 +141,28 @@ export const AudioEngine: React.FC = () => {
 
         // Register Media Session handlers safely
         const actionHandlers: [MediaSessionAction, MediaSessionActionHandler][] = [
-          ['play', () => resume()],
-          ['pause', () => pause()],
+          [
+            'play',
+            () => {
+              resume();
+              if (isYtModeRef.current && ytPlayerRef.current) {
+                try {
+                  ytPlayerRef.current.playVideo?.();
+                } catch {}
+              }
+            },
+          ],
+          [
+            'pause',
+            () => {
+              pause();
+              if (isYtModeRef.current && ytPlayerRef.current) {
+                try {
+                  ytPlayerRef.current.pauseVideo?.();
+                } catch {}
+              }
+            },
+          ],
           ['previoustrack', () => previousTrack()],
           ['nexttrack', () => nextTrack()],
           [
@@ -155,6 +210,7 @@ export const AudioEngine: React.FC = () => {
       setIsLoading(true);
       setError(null);
       updateMediaSession(currentTrack);
+      ensureAudioContext();
 
       // Maintain native audio context loop for mobile lock screen & background playback
       if (audioRef.current) {
@@ -186,7 +242,7 @@ export const AudioEngine: React.FC = () => {
         pendingYtVideoIdRef.current = videoId;
       }
     },
-    [currentTrack, isMuted, volume, updateMediaSession, setIsLoading, setError]
+    [currentTrack, isMuted, volume, updateMediaSession, setIsLoading, setError, ensureAudioContext]
   );
 
   // Initialize YouTube IFrame API for client-side fallback (works on mobile & Vercel without PC)
@@ -230,8 +286,20 @@ export const AudioEngine: React.FC = () => {
                   navigator.mediaSession.playbackState = 'playing';
                 }
               } else if (event.data === 2) {
-                if ('mediaSession' in navigator) {
-                  navigator.mediaSession.playbackState = 'paused';
+                const shouldBePlaying = usePlayerStore.getState().isPlaying;
+                if (shouldBePlaying && isYtModeRef.current) {
+                  // If browser or YouTube paused playback due to app switch or lock screen, auto-resume!
+                  setTimeout(() => {
+                    if (usePlayerStore.getState().isPlaying && isYtModeRef.current) {
+                      try {
+                        ytPlayerRef.current?.playVideo?.();
+                      } catch {}
+                    }
+                  }, 120);
+                } else {
+                  if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'paused';
+                  }
                 }
               } else if (event.data === 0) {
                 nextTrack();
@@ -268,6 +336,38 @@ export const AudioEngine: React.FC = () => {
       };
     }
   }, [setIsPlaying, setIsLoading, setNetworkInterrupted, setError, nextTrack, playViaYouTubePlayer]);
+
+  // Prevent background pause on app switch or screen lock
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleBackgroundEvent = (e: Event) => {
+      if (isYtModeRef.current && usePlayerStore.getState().isPlaying) {
+        try {
+          e.stopImmediatePropagation();
+        } catch {}
+        setTimeout(() => {
+          if (isYtModeRef.current && usePlayerStore.getState().isPlaying) {
+            try {
+              ytPlayerRef.current?.playVideo?.();
+            } catch {}
+          }
+        }, 150);
+      }
+    };
+
+    window.addEventListener('blur', handleBackgroundEvent, true);
+    window.addEventListener('pagehide', handleBackgroundEvent, true);
+    document.addEventListener('visibilitychange', handleBackgroundEvent, true);
+    document.addEventListener('webkitvisibilitychange', handleBackgroundEvent, true);
+
+    return () => {
+      window.removeEventListener('blur', handleBackgroundEvent, true);
+      window.removeEventListener('pagehide', handleBackgroundEvent, true);
+      document.removeEventListener('visibilitychange', handleBackgroundEvent, true);
+      document.removeEventListener('webkitvisibilitychange', handleBackgroundEvent, true);
+    };
+  }, []);
 
   // Polling interval to synchronize YouTube playback progress with the UI & MediaSession
   useEffect(() => {
@@ -797,13 +897,13 @@ export const AudioEngine: React.FC = () => {
         id="imusic-yt-persistent-container"
         style={{
           position: 'fixed',
-          bottom: '-1000px',
-          right: '-1000px',
+          bottom: 0,
+          left: 0,
           width: '200px',
           height: '200px',
           opacity: 0.001,
           pointerEvents: 'none',
-          zIndex: -9999,
+          zIndex: -1,
         }}
         aria-hidden="true"
       >
