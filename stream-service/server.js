@@ -1,94 +1,60 @@
 const express = require('express');
 const cors = require('cors');
-const { spawn } = require('child_process');
+const { Innertube, Platform, Log } = require('youtubei.js');
+
+Log.setLevel(Log.Level.NONE);
+Platform.shim.eval = async (data) => new Function(data.output)();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 
-// In-memory cache for resolved direct stream URLs (valid for 4 hours)
+let innertube = null;
+async function getInnertube() {
+  if (innertube) return innertube;
+  innertube = await Innertube.create();
+  return innertube;
+}
+
 const urlCache = new Map();
 
-function resolveWithYtDlp(videoId) {
-  return new Promise((resolve, reject) => {
-    const cached = urlCache.get(videoId);
-    if (cached && cached.expiresAt > Date.now()) {
-      return resolve(cached);
-    }
+async function resolveDirectAudio(videoId) {
+  const cached = urlCache.get(videoId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached;
+  }
 
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const args = [
-      '-g',
-      '--extractor-args',
-      'youtube:player_client=android,web',
-      '-f',
-      'bestaudio[ext=m4a]/bestaudio/18/b/best',
-      '--no-warnings',
-      '--no-check-certificates',
-    ];
+  const yt = await getInnertube();
+  const clients = ['MWEB', 'TV_SIMPLY', 'IOS', 'ANDROID'];
+  let lastErr = null;
 
-    if (process.env.YOUTUBE_COOKIE) {
-      args.push('--add-header', `Cookie:${process.env.YOUTUBE_COOKIE}`);
-    }
+  for (const client of clients) {
+    try {
+      const info = await yt.getInfo(videoId, { client });
+      const fmt =
+        info.chooseFormat({ type: 'audio', quality: 'best' }) ||
+        info.chooseFormat({ format: 18 }) ||
+        info.chooseFormat({ quality: 'best' });
 
-    args.push(videoUrl);
-
-    const proc = spawn('yt-dlp', args);
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    proc.on('close', (code) => {
-      if (code === 0 && stdout.trim().startsWith('http')) {
-        const streamUrl = stdout.trim().split('\n')[0].trim();
-        const info = {
-          url: streamUrl,
-          expiresAt: Date.now() + 4 * 3600 * 1000,
-        };
-        urlCache.set(videoId, info);
-        resolve(info);
-      } else {
-        // Fallback without extractorArgs in case android client is ever throttled
-        const fallbackProc = spawn('yt-dlp', [
-          '-g',
-          '-f',
-          'ba/b/18/best',
-          '--no-warnings',
-          videoUrl,
-        ]);
-
-        let fbStdout = '';
-        fallbackProc.stdout.on('data', (c) => { fbStdout += c.toString(); });
-        fallbackProc.on('close', (fbCode) => {
-          if (fbCode === 0 && fbStdout.trim().startsWith('http')) {
-            const streamUrl = fbStdout.trim().split('\n')[0].trim();
-            const info = {
-              url: streamUrl,
-              expiresAt: Date.now() + 4 * 3600 * 1000,
-            };
-            urlCache.set(videoId, info);
-            resolve(info);
-          } else {
-            reject(new Error(`yt-dlp failed (code ${code}): ${stderr || 'No stream URL produced'}`));
-          }
-        });
-        fallbackProc.on('error', (fbErr) => reject(fbErr));
+      if (fmt) {
+        const streamUrl = await fmt.decipher(yt.session.player);
+        if (streamUrl && streamUrl.startsWith('http')) {
+          const item = {
+            url: streamUrl,
+            contentLength: fmt.content_length || 4500000,
+            expiresAt: Date.now() + 4 * 3600 * 1000,
+          };
+          urlCache.set(videoId, item);
+          return item;
+        }
       }
-    });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
 
-    proc.on('error', (err) => {
-      reject(err);
-    });
-  });
+  throw lastErr || new Error(`Could not resolve audio format for ${videoId}`);
 }
 
 // Health check endpoint for Render/Koyeb uptime monitors
@@ -96,7 +62,7 @@ app.get('/', (req, res) => {
   res.json({
     service: 'imusic-stream-service',
     status: 'online',
-    version: '1.1.0',
+    version: '1.2.0',
     timestamp: new Date().toISOString(),
   });
 });
@@ -113,7 +79,7 @@ app.get('/resolve', async (req, res) => {
   }
 
   try {
-    const info = await resolveWithYtDlp(videoId);
+    const info = await resolveDirectAudio(videoId);
     res.json({
       status: 'ok',
       videoId,
@@ -126,27 +92,22 @@ app.get('/resolve', async (req, res) => {
   }
 });
 
-// Direct audio streaming proxy with HTTP Range support for mobile background playback
+// Direct audio streaming endpoint for HTML5 <audio>
 app.get('/stream', async (req, res) => {
   const videoId = req.query.v || req.query.id;
   if (!videoId || !/^[\w-]{11}$/.test(videoId)) {
     return res.status(400).json({ error: 'Valid 11-character YouTube video ID required (?v=...)' });
   }
 
-  // Redirect mode if requested
-  if (req.query.redirect === 'true') {
-    try {
-      const info = await resolveWithYtDlp(videoId);
-      return res.redirect(302, info.url);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-  }
-
   try {
-    const info = await resolveWithYtDlp(videoId);
-    const clientRange = req.headers.range || 'bytes=0-';
+    const info = await resolveDirectAudio(videoId);
 
+    // If client requested 302 redirect for direct CDN streaming
+    if (req.query.redirect === 'true') {
+      return res.redirect(302, info.url);
+    }
+
+    const clientRange = req.headers.range || 'bytes=0-';
     const upstreamHeaders = {
       Range: clientRange,
       'User-Agent':
@@ -160,7 +121,8 @@ app.get('/stream', async (req, res) => {
 
     if (!upstreamRes.ok && upstreamRes.status >= 400) {
       urlCache.delete(videoId);
-      return res.status(upstreamRes.status).send('Upstream stream error');
+      // Fallback: Redirect directly
+      return res.redirect(302, info.url);
     }
 
     const upstreamType = upstreamRes.headers.get('content-type') || 'audio/mp4';
