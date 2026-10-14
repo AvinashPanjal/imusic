@@ -213,33 +213,10 @@ export async function POST(request: NextRequest) {
 
     // If this is a YouTube track ID or foreign imported track:
     if (trackId.startsWith('yt-') || trackId.startsWith('foreign-')) {
-      const vid = trackId.replace(/^yt-/, '');
+      const vid = trackId.replace(/^(yt-|foreign-)/, '');
       const rawTitle = title || '';
 
-      // 1. Try to upgrade to 320 KBPS Studio AAC on JioSaavn if exact song exists
-      if (rawTitle) {
-        const candidate = await resolveAnyPlayableStream(rawTitle, artist);
-        if (candidate && !candidate.streamUrl.startsWith('/api/stream/yt')) {
-          return NextResponse.json({
-            streamUrl: candidate.streamUrl,
-            trackId,
-            title: candidate.title,
-            recovered: true,
-            asset: {
-              id: `asset-${trackId}`,
-              format: 'mp4',
-              codec: 'AAC',
-              bitDepth: 16,
-              sampleRate: 44100,
-              bitrate: 320,
-              isLossless: true,
-              isHiRes: false,
-            },
-          });
-        }
-      }
-
-      // 2. Direct native YouTube audio stream
+      // Direct native YouTube audio stream - never substitute with different songs!
       return NextResponse.json({
         streamUrl: `/api/stream/yt?v=${vid}`,
         trackId,

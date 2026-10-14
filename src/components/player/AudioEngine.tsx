@@ -39,19 +39,38 @@ export const AudioEngine: React.FC = () => {
     }
   }, []);
 
-  // Helper to resolve playable URL for standard audio (320 KBPS Studio AAC)
+  // Helper to resolve playable URL for standard audio
   const resolveTrackUrl = useCallback(
     async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
       if (!track) return null;
+
+      // 1. YouTube direct stream URL or YouTube ID -> ALWAYS play the exact YouTube audio!
+      if (track.streamUrl && track.streamUrl.startsWith('/api/stream/yt')) {
+        return track.streamUrl;
+      }
+      if (track.streamUrl && track.streamUrl.startsWith('youtube:')) {
+        return `/api/stream/yt?v=${track.streamUrl.replace('youtube:', '')}`;
+      }
+      if (track.id && track.id.startsWith('yt-')) {
+        return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
+      }
+
+      // 2. Direct standard audio URL (JioSaavn CDN, Audius, CC, etc.)
       if (track.streamUrl && !forceRefresh && !track.streamUrl.startsWith('youtube:')) {
         return track.streamUrl;
       }
 
-      // Check if track has an audio asset (when not forcing remote refresh)
+      // 3. Audio asset
       if (!forceRefresh) {
         const primaryAsset = track.assets?.[0];
         if (primaryAsset) {
-          if (primaryAsset.storageType === 'remote_stream' && !primaryAsset.storageKey.startsWith('youtube:')) {
+          if (primaryAsset.storageKey?.startsWith('/api/stream/yt')) {
+            return primaryAsset.storageKey;
+          }
+          if (primaryAsset.storageKey?.startsWith('youtube:')) {
+            return `/api/stream/yt?v=${primaryAsset.storageKey.replace('youtube:', '')}`;
+          }
+          if (primaryAsset.storageType === 'remote_stream') {
             return primaryAsset.storageKey;
           }
           if (primaryAsset.id) {
@@ -231,16 +250,25 @@ export const AudioEngine: React.FC = () => {
       }
     };
 
-    // FAST PATH: Direct standard audio URL already known
-    if (currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')) {
+    // FAST PATH: Direct standard audio URL or YouTube stream URL already known
+    if (currentTrack.streamUrl) {
+      if (currentTrack.streamUrl.startsWith('youtube:')) {
+        startAudioPlayback(`/api/stream/yt?v=${currentTrack.streamUrl.replace('youtube:', '')}`);
+        return;
+      }
       startAudioPlayback(currentTrack.streamUrl);
       return;
     }
 
-    // RESOLVE PATH: Resolve track to studio AAC stream
+    if (currentTrack.id?.startsWith('yt-')) {
+      startAudioPlayback(`/api/stream/yt?v=${currentTrack.id.replace('yt-', '')}`);
+      return;
+    }
+
+    // RESOLVE PATH: Resolve track to stream
     resolveTrackUrl(currentTrack).then((resolvedUrl) => {
       if (!active) return;
-      if (!resolvedUrl || resolvedUrl.startsWith('youtube:')) {
+      if (!resolvedUrl) {
         setError('Audio stream unavailable for this track');
         setIsLoading(false);
         return;
