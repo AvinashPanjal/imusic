@@ -13,6 +13,98 @@ try {
   }
 } catch {}
 
+// In-memory promise tracker to prevent duplicate concurrent downloads for the same video
+const ongoingDownloads = new Map<string, Promise<string>>();
+
+function downloadTrack(videoId: string, targetPath: string): Promise<string> {
+  const existing = ongoingDownloads.get(videoId);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = new Promise<string>((resolve, reject) => {
+    const tempPath = `${targetPath}.${Date.now()}.tmp`;
+
+    const proc = spawn('yt-dlp', [
+      '--no-playlist',
+      '--no-warnings',
+      '--no-check-certificates',
+      '--concurrent-fragments',
+      '4',
+      '-f',
+      'ba[ext=m4a]/ba',
+      '-o',
+      tempPath,
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ]);
+
+    let stderr = '';
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+
+    proc.on('close', (code) => {
+      ongoingDownloads.delete(videoId);
+      if (code === 0 && fs.existsSync(tempPath) && fs.statSync(tempPath).size > 10000) {
+        try {
+          fs.renameSync(tempPath, targetPath);
+          resolve(targetPath);
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        try {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        } catch {}
+        reject(new Error(`yt-dlp failed (code ${code}): ${stderr.slice(0, 200)}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      ongoingDownloads.delete(videoId);
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {}
+      reject(err);
+    });
+  });
+
+  ongoingDownloads.set(videoId, promise);
+  return promise;
+}
+
+export async function HEAD(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const videoId = searchParams.get('v') || searchParams.get('id');
+
+    if (!videoId || !/^[\w-]{11}$/.test(videoId)) {
+      return new NextResponse(null, { status: 400 });
+    }
+
+    const cachedFilePath = path.join(CACHE_DIR, `${videoId}.m4a`);
+
+    if (!fs.existsSync(cachedFilePath)) {
+      await downloadTrack(videoId, cachedFilePath);
+    }
+
+    const stat = fs.statSync(cachedFilePath);
+
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Content-Type': 'audio/mp4',
+        'Content-Length': String(stat.size),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=604800, immutable',
+      },
+    });
+  } catch (err) {
+    console.error('HEAD stream error:', err);
+    return new NextResponse(null, { status: 500 });
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -24,44 +116,23 @@ export async function GET(request: NextRequest) {
 
     const cachedFilePath = path.join(CACHE_DIR, `${videoId}.m4a`);
 
-    // 1. If audio file is already cached locally, stream it with Range request support (HTTP 206)
-    if (fs.existsSync(cachedFilePath)) {
-      const stat = fs.statSync(cachedFilePath);
-      const fileSize = stat.size;
-      const range = request.headers.get('range');
+    // Ensure audio file is downloaded to cache
+    if (!fs.existsSync(cachedFilePath)) {
+      await downloadTrack(videoId, cachedFilePath);
+    }
 
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        const chunkSize = end - start + 1;
+    const stat = fs.statSync(cachedFilePath);
+    const fileSize = stat.size;
+    const range = request.headers.get('range');
 
-        const fileStream = fs.createReadStream(cachedFilePath, { start, end });
-        const webStream = new ReadableStream({
-          start(controller) {
-            fileStream.on('data', (chunk) => controller.enqueue(chunk));
-            fileStream.on('end', () => controller.close());
-            fileStream.on('error', (err) => controller.error(err));
-          },
-          cancel() {
-            fileStream.destroy();
-          },
-        });
+    // Handle HTTP 206 Partial Content for byte-range seeking
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
 
-        return new NextResponse(webStream, {
-          status: 206,
-          headers: {
-            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': String(chunkSize),
-            'Content-Type': 'audio/mp4',
-            'Cache-Control': 'public, max-age=604800, immutable',
-          },
-        });
-      }
-
-      // Full file stream from cache
-      const fileStream = fs.createReadStream(cachedFilePath);
+      const fileStream = fs.createReadStream(cachedFilePath, { start, end });
       const webStream = new ReadableStream({
         start(controller) {
           fileStream.on('data', (chunk) => controller.enqueue(chunk));
@@ -74,102 +145,37 @@ export async function GET(request: NextRequest) {
       });
 
       return new NextResponse(webStream, {
-        status: 200,
+        status: 206,
         headers: {
-          'Content-Length': String(fileSize),
-          'Content-Type': 'audio/mp4',
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
           'Accept-Ranges': 'bytes',
+          'Content-Length': String(chunkSize),
+          'Content-Type': 'audio/mp4',
           'Cache-Control': 'public, max-age=604800, immutable',
         },
       });
     }
 
-    // 2. Not cached: Stream live audio via yt-dlp and cache simultaneously
-    const tempFilePath = path.join(CACHE_DIR, `${videoId}.tmp`);
-    let fileWriteStream: fs.WriteStream | null = null;
-    try {
-      fileWriteStream = fs.createWriteStream(tempFilePath);
-    } catch {}
-
-    const proc = spawn('yt-dlp', [
-      '--no-playlist',
-      '--no-cache-dir',
-      '--no-check-certificates',
-      '--no-warnings',
-      '-f',
-      'ba[ext=m4a]/ba',
-      '-o',
-      '-',
-      `https://www.youtube.com/watch?v=${videoId}`,
-    ]);
-
-    let isClosed = false;
-
-    const liveStream = new ReadableStream({
+    // Full file stream
+    const fileStream = fs.createReadStream(cachedFilePath);
+    const webStream = new ReadableStream({
       start(controller) {
-        proc.stdout.on('data', (chunk: Buffer) => {
-          try {
-            controller.enqueue(new Uint8Array(chunk));
-            if (fileWriteStream && !fileWriteStream.destroyed) {
-              fileWriteStream.write(chunk);
-            }
-          } catch {}
-        });
-
-        proc.stdout.on('end', () => {
-          if (!isClosed) {
-            isClosed = true;
-            try {
-              controller.close();
-            } catch {}
-          }
-          if (fileWriteStream) {
-            fileWriteStream.end(() => {
-              try {
-                if (fs.existsSync(tempFilePath) && fs.statSync(tempFilePath).size > 10000) {
-                  fs.renameSync(tempFilePath, cachedFilePath);
-                }
-              } catch {}
-            });
-          }
-        });
-
-        proc.on('error', (err) => {
-          if (!isClosed) {
-            isClosed = true;
-            try {
-              controller.error(err);
-            } catch {}
-          }
-          if (fileWriteStream) {
-            fileWriteStream.destroy();
-            try {
-              if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-            } catch {}
-          }
-        });
+        fileStream.on('data', (chunk) => controller.enqueue(chunk));
+        fileStream.on('end', () => controller.close());
+        fileStream.on('error', (err) => controller.error(err));
       },
       cancel() {
-        if (!isClosed) {
-          isClosed = true;
-          proc.kill('SIGTERM');
-        }
-        if (fileWriteStream) {
-          fileWriteStream.destroy();
-          try {
-            if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-          } catch {}
-        }
+        fileStream.destroy();
       },
     });
 
-    return new NextResponse(liveStream, {
+    return new NextResponse(webStream, {
       status: 200,
       headers: {
+        'Content-Length': String(fileSize),
         'Content-Type': 'audio/mp4',
-        'Transfer-Encoding': 'chunked',
-        'Cache-Control': 'public, max-age=86400',
         'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=604800, immutable',
       },
     });
   } catch (error) {
