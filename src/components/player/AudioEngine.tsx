@@ -508,10 +508,10 @@ export const AudioEngine: React.FC = () => {
     const ytId = extractYouTubeId(currentTrack);
     const isVercel = isVercelEnvironment();
 
-    // If direct streaming previously failed on this session, use client YouTube player fallback.
-    // Otherwise, attempt native HTML5 <audio> streaming (which enables 100% background playback with screen locked).
-    if (ytId && directStreamFailedRef.current) {
-      console.log(`Direct audio stream previously unavailable; playing YouTube video ${ytId} via client player.`);
+    // On Vercel / cloud hosts, YouTube tracks play synchronously via the client player engine
+    // to preserve the mobile user-tap autoplay gesture and prevent browser autoplay blocking.
+    if (ytId && (isVercel || directStreamFailedRef.current)) {
+      console.log(`Streaming YouTube video ${ytId} via client player engine.`);
       playViaYouTubePlayer(ytId);
       return;
     }
