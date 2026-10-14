@@ -737,87 +737,88 @@ export async function POST(request: NextRequest) {
     const tracksToProcess = parsedPlaylist.tracks.slice(0, 500);
     const fullTracks: TrackData[] = [];
 
-    // Concurrent batch processing (10 songs in parallel for high speed)
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < tracksToProcess.length; i += BATCH_SIZE) {
-      const chunk = tracksToProcess.slice(i, i + BATCH_SIZE);
-      const chunkResults = await Promise.all(
-        chunk.map(async (item, chunkOffset) => {
-          const globalIdx = i + chunkOffset;
-          try {
-            const match = item.videoId
-              ? {
-                  streamUrl: `/api/stream/yt?v=${item.videoId}`,
-                  matchedTitle: item.title,
-                  matchedArtist: item.artist,
-                  albumTitle: `${item.title} - Single`,
-                  coverImage: item.coverImage || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-                  duration: item.duration || 180,
-                  year: new Date().getFullYear(),
-                  genre: 'YouTube Music',
-                  providerCode: 'youtube',
-                }
-              : await matchPlayableStream(item.title, item.artist);
-
-            const trackTitle = match?.matchedTitle || item.title;
-            const artistName = match?.matchedArtist || item.artist || 'Unknown Artist';
-            const albumName = match?.albumTitle || `${trackTitle} - Single`;
-            const coverImage = match?.coverImage || item.coverImage || '/icons/default-artwork.png';
-            const streamUrl = match?.streamUrl || '';
-            const duration = match?.duration || item.duration || 180;
-            const trackId = `track_${Date.now()}_${globalIdx}`;
-
-            const trackObj: TrackData = {
-              id: trackId,
-              title: trackTitle,
-              duration,
-              trackNumber: globalIdx + 1,
-              genre: match?.genre || 'Soundtrack',
-              artists: [{ id: `art_${globalIdx}`, name: artistName, image: coverImage }],
-              album: {
-                id: `alb_${globalIdx}`,
-                title: albumName,
-                coverImage,
-                releaseYear: match?.year || new Date().getFullYear(),
-                isLossless: true,
-              },
-              assets: streamUrl
-                ? [
-                    {
-                      id: `asset_${globalIdx}`,
-                      trackId,
-                      format: 'mp4',
-                      codec: 'AAC',
-                      bitrate: 320,
-                      isLossless: true,
-                      isHiRes: false,
-                      storageType: 'remote_stream',
-                      storageKey: streamUrl,
-                      duration,
-                    },
-                  ]
-                : [],
-              streamUrl: streamUrl || undefined,
-              providerCode: (match?.providerCode as any) || (item.videoId ? 'youtube' : 'saavn'),
-            };
-
-            return { trackObj, streamUrl, coverImage };
-          } catch (trackErr) {
-            console.warn(`Error processing track ${item.title}:`, trackErr);
-            return null;
-          }
-        })
-      );
-
-      for (const r of chunkResults) {
-        if (r) {
-          if (!playlistFirstCover && r.coverImage && !r.coverImage.includes('default-artwork')) {
-            playlistFirstCover = r.coverImage;
-          }
-          if (r.streamUrl) matchedCount++;
-          fullTracks.push(r.trackObj);
+    // Pre-match the first 2 tracks concurrently for instant playback on the first song;
+    // all other tracks resolve on-demand seamlessly via /api/playback/resolve when clicked!
+    const preMatches = await Promise.all(
+      tracksToProcess.slice(0, 2).map(async (item) => {
+        if (item.videoId) return null;
+        try {
+          const matchPromise = matchPlayableStream(item.title, item.artist);
+          const matchTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800));
+          return await Promise.race([matchPromise, matchTimeout]);
+        } catch {
+          return null;
         }
+      })
+    );
+
+    for (let i = 0; i < tracksToProcess.length; i++) {
+      const item = tracksToProcess[i];
+      const trackId = `track_${Date.now()}_${i}`;
+      let streamUrl = '';
+      let coverImage = item.coverImage || '/icons/default-artwork.png';
+      let trackTitle = item.title;
+      let artistName = item.artist || 'Unknown Artist';
+      let albumName = `${trackTitle} - Single`;
+      let duration = item.duration || 180;
+      let providerCode: any = 'saavn';
+
+      if (item.videoId) {
+        streamUrl = `/api/stream/yt?v=${item.videoId}`;
+        coverImage = item.coverImage || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`;
+        providerCode = 'youtube';
+        matchedCount++;
+      } else if (i < preMatches.length && preMatches[i]) {
+        const match = preMatches[i]!;
+        trackTitle = match.matchedTitle || trackTitle;
+        artistName = match.matchedArtist || artistName;
+        albumName = match.albumTitle || albumName;
+        coverImage = match.coverImage || coverImage;
+        streamUrl = match.streamUrl || '';
+        duration = match.duration || duration;
+        providerCode = match.providerCode || 'saavn';
+        if (streamUrl) matchedCount++;
       }
+
+      if (!playlistFirstCover && coverImage && !coverImage.includes('default-artwork')) {
+        playlistFirstCover = coverImage;
+      }
+
+      const trackObj: TrackData = {
+        id: trackId,
+        title: trackTitle,
+        duration,
+        trackNumber: i + 1,
+        genre: 'Soundtrack',
+        artists: [{ id: `art_${i}`, name: artistName, image: coverImage }],
+        album: {
+          id: `alb_${i}`,
+          title: albumName,
+          coverImage,
+          releaseYear: new Date().getFullYear(),
+          isLossless: true,
+        },
+        assets: streamUrl
+          ? [
+              {
+                id: `asset_${i}`,
+                trackId,
+                format: 'mp4',
+                codec: 'AAC',
+                bitrate: 320,
+                isLossless: true,
+                isHiRes: false,
+                storageType: 'remote_stream',
+                storageKey: streamUrl,
+                duration,
+              },
+            ]
+          : [],
+        streamUrl: streamUrl || undefined,
+        providerCode,
+      };
+
+      fullTracks.push(trackObj);
     }
 
     const playlistResponse: PlaylistData = {
@@ -835,127 +836,29 @@ export async function POST(request: NextRequest) {
       })),
     };
 
-    // Safely attempt to persist to Prisma if DB is available (guarded by timeout to prevent Vercel 500)
+    // Safely attempt to persist playlist header to Prisma if DB is available
     try {
-      const dbPersistPromise = async () => {
-        let user = await prisma.user.findFirst();
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              email: 'listener@imusic.local',
-              name: 'Audiophile',
-              role: 'user',
-            },
-          });
-        }
-
-        const dbPlaylist = await prisma.playlist.create({
+      let user = await prisma.user.findFirst();
+      if (!user) {
+        user = await prisma.user.create({
           data: {
-            title: finalTitle,
-            description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
-            coverImage: playlistResponse.coverImage,
-            userId: user.id,
+            email: 'listener@imusic.local',
+            name: 'Audiophile',
+            role: 'user',
           },
         });
+      }
 
-        playlistResponse.id = dbPlaylist.id;
+      const dbPlaylist = await prisma.playlist.create({
+        data: {
+          title: finalTitle,
+          description: parsedPlaylist.description || `Imported playlist (${fullTracks.length} tracks)`,
+          coverImage: playlistResponse.coverImage,
+          userId: user.id,
+        },
+      });
 
-        // In-memory caches to minimize DB queries
-        const artistCache = new Map<string, string>();
-        const albumCache = new Map<string, string>();
-
-        for (let i = 0; i < fullTracks.length; i++) {
-          const t = fullTracks[i];
-          try {
-            const artistName = t.artists[0]?.name || 'Unknown Artist';
-            let artistId = artistCache.get(artistName);
-            if (!artistId) {
-              let artist = await prisma.artist.findFirst({ where: { name: artistName } });
-              if (!artist) {
-                artist = await prisma.artist.create({
-                  data: { name: artistName, image: t.album?.coverImage },
-                });
-              }
-              artistId = artist.id;
-              artistCache.set(artistName, artistId);
-            }
-
-            const albumName = t.album?.title || `${t.title} - Single`;
-            const albumKey = `${albumName}_${artistId}`;
-            let albumId = albumCache.get(albumKey);
-            if (!albumId) {
-              let album = await prisma.album.findFirst({ where: { title: albumName, artistId } });
-              if (!album) {
-                album = await prisma.album.create({
-                  data: {
-                    title: albumName,
-                    artistId,
-                    coverImage: t.album?.coverImage,
-                    releaseYear: t.album?.releaseYear || new Date().getFullYear(),
-                    isLossless: true,
-                  },
-                });
-              }
-              albumId = album.id;
-              albumCache.set(albumKey, albumId);
-            }
-
-            let dbTrack = await prisma.track.findFirst({
-              where: { title: t.title, albumId },
-            });
-
-            if (!dbTrack) {
-              dbTrack = await prisma.track.create({
-                data: {
-                  title: t.title,
-                  albumId,
-                  duration: t.duration,
-                  genre: t.genre || 'Soundtrack',
-                  trackNumber: i + 1,
-                  artists: {
-                    create: {
-                      artistId,
-                      role: 'primary',
-                    },
-                  },
-                  assets: t.streamUrl
-                    ? {
-                        create: {
-                          format: 'mp4',
-                          codec: 'AAC',
-                          bitDepth: 16,
-                          sampleRate: 44100,
-                          bitrate: 320,
-                          isLossless: true,
-                          isHiRes: false,
-                          storageType: 'remote_stream',
-                          storageKey: t.streamUrl,
-                          duration: t.duration,
-                        },
-                      }
-                    : undefined,
-                },
-              });
-            }
-
-            await prisma.playlistTrack.create({
-              data: {
-                playlistId: dbPlaylist.id,
-                trackId: dbTrack.id,
-                position: i + 1,
-              },
-            });
-          } catch (trackDbErr) {
-            console.warn(`Could not persist track ${t.title} to DB:`, trackDbErr);
-          }
-        }
-      };
-
-      // Ensure DB persistence does not exceed 4 seconds
-      await Promise.race([
-        dbPersistPromise(),
-        new Promise((resolve) => setTimeout(resolve, 4000)),
-      ]);
+      playlistResponse.id = dbPlaylist.id;
     } catch (dbErr) {
       console.warn('Prisma DB not available or slow; stored in client LocalLibrary:', dbErr);
     }

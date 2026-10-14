@@ -209,8 +209,19 @@ export default function LibraryPage() {
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success && data.playlist) {
+      let data: any = null;
+      const text = await res.text();
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(
+          res.status === 504
+            ? 'Import timed out on server. Please try again with fewer tracks.'
+            : `Server returned error (${res.status}): ${text.slice(0, 100)}`
+        );
+      }
+
+      if (res.ok && data?.success && data.playlist) {
         LocalLibrary.savePlaylist(data.playlist);
         setPlaylists((prev) => [data.playlist, ...prev.filter((p) => p.id !== data.playlist.id)]);
         setImportResult(data);
@@ -219,7 +230,7 @@ export default function LibraryPage() {
       } else {
         setImportResult({
           success: false,
-          error: data.error || 'Failed to import playlist. Please check link and ensure it is public.',
+          error: data?.error || 'Failed to import playlist. Please check file/links and try again.',
         });
       }
     } catch (err: any) {
