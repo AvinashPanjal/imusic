@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: imusic-stream-service
+    env: docker
+    dockerfilePath: ./stream-service/Dockerfile
+    dockerContext: ./stream-service
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /health

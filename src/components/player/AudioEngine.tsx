@@ -508,11 +508,10 @@ export const AudioEngine: React.FC = () => {
     const ytId = extractYouTubeId(currentTrack);
     const isVercel = isVercelEnvironment();
 
-    // FAST PATH FOR YOUTUBE ON VERCEL OR CLOUD:
-    // Vercel serverless IPs are blocked by YouTube BotGuard.
-    // Playing via the user's mobile/desktop client YouTube player bypasses all datacenter blocks 100% reliably.
-    if (ytId && (isVercel || directStreamFailedRef.current)) {
-      console.log(`Direct cloud streaming YouTube video ${ytId} via client player engine.`);
+    // If direct streaming previously failed on this session, use client YouTube player fallback.
+    // Otherwise, attempt native HTML5 <audio> streaming (which enables 100% background playback with screen locked).
+    if (ytId && directStreamFailedRef.current) {
+      console.log(`Direct audio stream previously unavailable; playing YouTube video ${ytId} via client player.`);
       playViaYouTubePlayer(ytId);
       return;
     }

@@ -104,7 +104,32 @@ async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | nu
   }
 
   const resolvePromise = (async () => {
-    // Attempt 1: Pure Node.js Innertube with VISIONOS client (Works 100% on Vercel without external binaries)
+    // Attempt 0: Dedicated stream microservice (on Render / Koyeb) - 100% bypasses datacenter blocks
+    const streamServer = process.env.STREAM_SERVER_URL || process.env.EXTERNAL_STREAM_URL;
+    if (streamServer) {
+      try {
+        const cleanServer = streamServer.replace(/\/$/, '');
+        const res = await fetch(`${cleanServer}/resolve?v=${videoId}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.streamUrl) {
+            const serverInfo: CachedStream = {
+              url: data.streamUrl,
+              contentLength: 3500000,
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+            };
+            streamUrlCache.set(videoId, serverInfo);
+            return serverInfo;
+          }
+        }
+      } catch (serverErr: any) {
+        lastResolveError += `[STREAM_SERVER: ${serverErr?.message || serverErr}] `;
+      }
+    }
+
+    // Attempt 1: Pure Node.js Innertube with multi-client fallback
     const streamInfo = await resolveViaInnertube(videoId);
     if (streamInfo) {
       streamUrlCache.set(videoId, streamInfo);
@@ -166,6 +191,37 @@ export async function GET(request: NextRequest) {
 
     if (!videoId || !/^[\w-]{11}$/.test(videoId)) {
       return NextResponse.json({ error: 'Invalid or missing YouTube video ID' }, { status: 400 });
+    }
+
+    // 0. If a dedicated stream server is configured, forward Range request directly for 100% cloud audio streaming
+    const streamServer = process.env.STREAM_SERVER_URL || process.env.EXTERNAL_STREAM_URL;
+    if (streamServer) {
+      try {
+        const cleanServer = streamServer.replace(/\/$/, '');
+        const clientRange = request.headers.get('range') || 'bytes=0-';
+        const streamRes = await fetch(`${cleanServer}/stream?v=${videoId}`, {
+          headers: { Range: clientRange },
+        });
+        if (streamRes.ok || streamRes.status === 206) {
+          const respHeaders = new Headers();
+          const contentType = streamRes.headers.get('content-type') || 'audio/mp4';
+          respHeaders.set('Content-Type', contentType.startsWith('audio/') ? contentType : 'audio/mp4');
+          respHeaders.set('Accept-Ranges', 'bytes');
+          respHeaders.set('Cache-Control', 'public, max-age=14400, immutable');
+          if (streamRes.headers.get('content-length')) {
+            respHeaders.set('Content-Length', streamRes.headers.get('content-length')!);
+          }
+          if (streamRes.headers.get('content-range')) {
+            respHeaders.set('Content-Range', streamRes.headers.get('content-range')!);
+          }
+          return new NextResponse(streamRes.body, {
+            status: streamRes.status,
+            headers: respHeaders,
+          });
+        }
+      } catch (proxyErr) {
+        console.warn('Proxy to STREAM_SERVER_URL failed, falling back to local resolver:', proxyErr);
+      }
     }
 
     // Resolve direct audio stream URL
