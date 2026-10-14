@@ -37,8 +37,8 @@ yarn-error.log*
 next-env.d.ts
 
 # SQLite local storage
-dev.db
 dev.db-journal
+!prisma/dev.db
 storage/audio/*
 !storage/audio/.gitkeep
 

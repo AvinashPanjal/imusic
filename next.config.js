@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     outputFileTracingIncludes: {
-      '/api/**/*': ['./node_modules/youtube-dl-exec/bin/**/*'],
+      '/api/**/*': ['./node_modules/youtube-dl-exec/bin/**/*', './prisma/dev.db'],
     },
   },
   images: {
