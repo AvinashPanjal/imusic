@@ -15,6 +15,73 @@ import styles from './search.module.css';
 const RECENT_SEARCHES_KEY = 'imusic_recent_searches_v1';
 const POPULAR_SOUNDTRACKS: AlbumSummary[] = FEATURED_SOUNDTRACKS;
 
+function stripLeadingArticles(str: string): string {
+  if (!str) return '';
+  return str.toLowerCase().replace(/^(the|a|an)\s+/i, '').trim();
+}
+
+function computeRelevanceScore(
+  title: string,
+  artistName: string | undefined,
+  query: string,
+  isSaavn: boolean
+): number {
+  if (!title || !query) return 0;
+  const rawClean = cleanSongTitle(title);
+  const qClean = query.toLowerCase().trim();
+  const qTokens = qClean.split(/\s+/).filter((w) => w.length > 2);
+
+  const titleNoArticle = stripLeadingArticles(title);
+  const cleanNoArticle = stripLeadingArticles(rawClean);
+  const qNoArticle = stripLeadingArticles(query);
+
+  const normTitle = normalizeSearchText(titleNoArticle);
+  const normClean = normalizeSearchText(cleanNoArticle);
+  const normQ = normalizeSearchText(qNoArticle);
+  const cleanNormQ = normalizeSearchText(cleanQuery(qNoArticle));
+
+  let score = 0;
+
+  // 1. Exact clean match without leading articles (e.g. "life of prince" == "the life of prince")
+  if (normClean === normQ || (cleanNormQ && normClean === cleanNormQ) || normTitle === normQ) {
+    score += 1000;
+  }
+  // 2. Starts with query without leading articles
+  else if (
+    normClean.startsWith(normQ) ||
+    (cleanNormQ && normClean.startsWith(cleanNormQ)) ||
+    normTitle.startsWith(normQ)
+  ) {
+    score += 500;
+  }
+  // 3. Contains all query tokens
+  else if (qTokens.length > 0 && qTokens.every((t) => title.toLowerCase().includes(t))) {
+    score += 300;
+  }
+  // 4. Fuzzy match
+  else if (fuzzyMatch(rawClean, query) || fuzzyMatch(title, query)) {
+    score += 150;
+  }
+
+  // Boost official Indian studio tracks (lossless 320kbps AAC, plays in background)
+  if (isSaavn) {
+    score += 50;
+  }
+
+  // Penalize instrumentals / karaoke / covers unless the user explicitly searched for them
+  if (!qClean.includes('instrumental') && title.toLowerCase().includes('instrumental')) {
+    score -= 250;
+  }
+  if (!qClean.includes('karaoke') && title.toLowerCase().includes('karaoke')) {
+    score -= 250;
+  }
+  if (!qClean.includes('cover') && title.toLowerCase().includes('cover')) {
+    score -= 100;
+  }
+
+  return score;
+}
+
 export default function SearchPage() {
   const router = useRouter();
   const { playTrack } = usePlayerStore();
@@ -93,37 +160,28 @@ export default function SearchPage() {
             return true;
           });
 
-          // Spotify-style client relevance sorting to guarantee exact matches are #1
-          const normQ = normalizeSearchText(debouncedQuery);
-          const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
-
-          if (normQ) {
+          // Intelligent relevance sorting to guarantee exact matches are #1
+          if (debouncedQuery) {
             uniqueTracks.sort((a, b) => {
-              const aClean = cleanSongTitle(a.title);
-              const bClean = cleanSongTitle(b.title);
-              const aNormClean = normalizeSearchText(aClean);
-              const bNormClean = normalizeSearchText(bClean);
-
-              // 1. Exact clean match has highest priority
-              const aExact = aNormClean === normQ || (cleanNormQ && aNormClean === cleanNormQ);
-              const bExact = bNormClean === normQ || (cleanNormQ && bNormClean === cleanNormQ);
-              if (aExact && !bExact) return -1;
-              if (bExact && !aExact) return 1;
-
-              // 2. Starts with query
-              const aStarts = aNormClean.startsWith(normQ) || (cleanNormQ && aNormClean.startsWith(cleanNormQ));
-              const bStarts = bNormClean.startsWith(normQ) || (cleanNormQ && bNormClean.startsWith(cleanNormQ));
-              if (aStarts && !bStarts) return -1;
-              if (bStarts && !aStarts) return 1;
-
-              // 3. Fuzzy match
-              const aFuzzy = fuzzyMatch(aClean, debouncedQuery) || fuzzyMatch(a.title, debouncedQuery);
-              const bFuzzy = fuzzyMatch(bClean, debouncedQuery) || fuzzyMatch(b.title, debouncedQuery);
-              if (aFuzzy && !bFuzzy) return -1;
-              if (bFuzzy && !aFuzzy) return 1;
-
-              // 4. Fallback to stream count
+              const isSaavnA = a.id.startsWith('saavn');
+              const isSaavnB = b.id.startsWith('saavn');
+              const scoreA = computeRelevanceScore(a.title, a.artists?.[0]?.name, debouncedQuery, isSaavnA);
+              const scoreB = computeRelevanceScore(b.title, b.artists?.[0]?.name, debouncedQuery, isSaavnB);
+              if (scoreA !== scoreB) {
+                return scoreB - scoreA;
+              }
               return (b.playCount || 0) - (a.playCount || 0);
+            });
+
+            uniqueAlbums.sort((a, b) => {
+              const isSaavnA = a.id.startsWith('saavn');
+              const isSaavnB = b.id.startsWith('saavn');
+              const scoreA = computeRelevanceScore(a.title, a.artistName, debouncedQuery, isSaavnA);
+              const scoreB = computeRelevanceScore(b.title, b.artistName, debouncedQuery, isSaavnB);
+              if (scoreA !== scoreB) {
+                return scoreB - scoreA;
+              }
+              return 0;
             });
           }
 
@@ -176,35 +234,15 @@ export default function SearchPage() {
   const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
   const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
 
-  const normQuery = normalizeSearchText(debouncedQuery);
-  const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
-  const normAlbumTitle = topAlbum ? normalizeSearchText(topAlbum.title) : '';
-  const topCleanTitle = topTrack ? cleanSongTitle(topTrack.title) : '';
-  const normTrackClean = topTrack ? normalizeSearchText(topCleanTitle) : '';
-  const normTrackTitle = topTrack ? normalizeSearchText(topTrack.title) : '';
+  const trackScore = topTrack
+    ? computeRelevanceScore(topTrack.title, topTrack.artists?.[0]?.name, debouncedQuery, topTrack.id.startsWith('saavn'))
+    : 0;
+  const isTrackExact = trackScore >= 300;
 
-  const isTrackExact = Boolean(
-    topTrack &&
-      (normTrackClean === normQuery ||
-        (cleanNormQ && normTrackClean === cleanNormQ) ||
-        normTrackTitle === normQuery ||
-        (cleanNormQ && normTrackTitle === cleanNormQ) ||
-        normTrackClean.startsWith(normQuery) ||
-        (cleanNormQ && normTrackClean.startsWith(cleanNormQ)) ||
-        normTrackTitle.startsWith(normQuery) ||
-        (cleanNormQ && normTrackTitle.startsWith(cleanNormQ)) ||
-        fuzzyMatch(topCleanTitle, debouncedQuery) ||
-        fuzzyMatch(topTrack?.title || '', debouncedQuery))
-  );
-
-  const isAlbumExact = Boolean(
-    topAlbum &&
-      (normAlbumTitle === normQuery ||
-        (cleanNormQ && normAlbumTitle === cleanNormQ) ||
-        normAlbumTitle.startsWith(normQuery) ||
-        (cleanNormQ && normAlbumTitle.startsWith(cleanNormQ)) ||
-        fuzzyMatch(topAlbum?.title || '', debouncedQuery))
-  );
+  const albumScore = topAlbum
+    ? computeRelevanceScore(topAlbum.title, topAlbum.artistName, debouncedQuery, topAlbum.id.startsWith('saavn'))
+    : 0;
+  const isAlbumExact = albumScore >= 500;
 
   // Check if query explicitly asks for a soundtrack, album, or movie
   const queryLower = debouncedQuery.toLowerCase();
@@ -214,17 +252,13 @@ export default function SearchPage() {
   const isTopMatchAlbum = Boolean(
     topAlbum &&
       !isTrackExact &&
-      (isExplicitAlbumSearch ||
-        isAlbumExact ||
-        fuzzyMatch(topAlbum.title, debouncedQuery) ||
-        normAlbumTitle.includes(normQuery) ||
-        normQuery.includes(normAlbumTitle) ||
-        topAlbum.title.toLowerCase().includes(queryLower) ||
-        queryLower.includes(topAlbum.title.toLowerCase()))
+      (isExplicitAlbumSearch || isAlbumExact)
   );
 
   const handlePlayTopResult = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    const normQuery = normalizeSearchText(debouncedQuery);
+    const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
     if (isTopMatchAlbum && topAlbum) {
       try {
         const res = await fetch(`/api/albums/${topAlbum.id}`);

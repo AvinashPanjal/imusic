@@ -203,15 +203,26 @@ export async function POST(request: NextRequest) {
       const candidateQueries: string[] = [];
       if (clean && clean.length >= 2) {
         candidateQueries.push(clean);
+        if (/^the\s+/i.test(clean)) {
+          candidateQueries.push(clean.replace(/^the\s+/i, '').trim());
+        } else {
+          candidateQueries.push(`The ${clean}`);
+        }
         if (clean.includes('-')) {
           const parts = clean.split('-').map((p) => p.trim()).filter((p) => p.length >= 2);
           for (const p of parts) {
             candidateQueries.push(p);
+            if (/^the\s+/i.test(p)) {
+              candidateQueries.push(p.replace(/^the\s+/i, '').trim());
+            }
           }
         }
       }
       if (artist && clean) {
-        candidateQueries.push(`${clean} ${artist}`);
+        const cleanArtist = artist.replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '').trim();
+        if (cleanArtist) {
+          candidateQueries.push(`${clean} ${cleanArtist}`);
+        }
       }
 
       for (const query of candidateQueries) {
