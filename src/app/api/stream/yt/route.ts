@@ -26,10 +26,9 @@ async function getInnertube() {
   return innertubeInstance;
 }
 
-// Pure Node.js stream decipherer with VISIONOS client (bypasses signature blocks and allows full range streaming)
+// Pure Node.js stream decipherer with multi-client format fallback
 async function resolveViaInnertube(videoId: string): Promise<CachedStream | null> {
-  // VISIONOS client format allows range streaming and doesn't get 403 on range requests
-  const clients = ['VISIONOS', 'ANDROID_VR', 'IOS'] as const;
+  const clients = ['VISIONOS', 'YTMUSIC', 'ANDROID', 'ANDROID_VR', 'IOS'] as const;
 
   try {
     const yt = await getInnertube();
@@ -54,6 +53,7 @@ async function resolveViaInnertube(videoId: string): Promise<CachedStream | null
     }
   } catch (err) {
     console.warn('Innertube resolve error:', err);
+    innertubeInstance = null; // Recreate session on next call if it became invalid
   }
 
   return null;
@@ -180,6 +180,10 @@ export async function GET(request: NextRequest) {
       method: 'GET',
       headers: upstreamHeaders,
     });
+
+    if (!upstreamRes.ok && upstreamRes.status >= 400) {
+      streamUrlCache.delete(videoId);
+    }
 
     const responseHeaders = new Headers();
     const upstreamType = upstreamRes.headers.get('content-type');

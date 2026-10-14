@@ -6,6 +6,16 @@ import CryptoJS from 'crypto-js';
 const SAAVN_API_BASE = 'https://www.jiosaavn.com/api.php';
 const DES_KEY = '38346591';
 
+export const SAAVN_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: 'application/json, text/plain, */*',
+  Cookie: 'L=malayalam%2Ctamil%2Chindi%2Cenglish%2Ctelugu%2Ckannada; DL=english; gdpr_acceptance=true; geo=IN',
+  'Accept-Language': 'en-IN,en;q=0.9,ml;q=0.8,ta;q=0.7',
+  'X-Forwarded-For': '103.154.37.105',
+  'CF-Connecting-IP': '103.154.37.105',
+};
+
 export function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
@@ -182,19 +192,14 @@ export class IndianMusicProvider implements CatalogueProvider {
             'The Weeknd Trending',
           ];
 
-      const headers = {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'application/json, text/plain, */*',
-      };
+      const headers = SAAVN_HEADERS;
 
-      // Fetch songs, albums, and autocomplete across query variants in parallel
       const searchPromises = queriesToRun.map(async (searchQuery) => {
-        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=35&q=${encodeURIComponent(
+        const songUrl = `${SAAVN_API_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&languages=malayalam,tamil,hindi,english,telugu,kannada&p=1&n=35&q=${encodeURIComponent(
           searchQuery
         )}`;
 
-        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=20&q=${encodeURIComponent(
+        const albumUrl = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&languages=malayalam,tamil,hindi,english,telugu,kannada&p=1&n=20&q=${encodeURIComponent(
           searchQuery
         )}`;
 
@@ -319,7 +324,7 @@ export class IndianMusicProvider implements CatalogueProvider {
 
       if (missingSongIds.length > 0) {
         try {
-          const pidsUrl = `${SAAVN_API_BASE}?__call=song.getDetails&_format=json&_marker=0&cc=in&pids=${encodeURIComponent(
+          const pidsUrl = `${SAAVN_API_BASE}?__call=song.getDetails&_format=json&_marker=0&api_version=4&ctx=web6dot0&cc=in&languages=malayalam,tamil,hindi,english,telugu,kannada&pids=${encodeURIComponent(
             missingSongIds.join(',')
           )}`;
           const pidsRes = await fetch(pidsUrl, { headers })
@@ -344,13 +349,14 @@ export class IndianMusicProvider implements CatalogueProvider {
         if (!item.id || seenIds.has(item.id)) continue;
         seenIds.add(item.id);
 
-        const streamUrl = decryptMediaUrl(item.encrypted_media_url);
+        const encryptedMedia = item.encrypted_media_url || item.more_info?.encrypted_media_url;
+        const streamUrl = decryptMediaUrl(encryptedMedia);
         if (!streamUrl) continue;
 
         const title = decodeHtmlEntities(item.song || item.title || 'Unknown Track');
-        const albumName = decodeHtmlEntities(item.album || title);
+        const albumName = decodeHtmlEntities(item.album || item.more_info?.album || title);
         const artistNames = decodeHtmlEntities(
-          item.primary_artists || item.singers || item.music || 'Various Artists'
+          item.primary_artists || item.more_info?.music || item.singers || item.music || 'Various Artists'
         );
 
         const rawCover = item.image || '';
@@ -358,9 +364,9 @@ export class IndianMusicProvider implements CatalogueProvider {
           ? rawCover.replace(/150x150\.jpg$/, '500x500.jpg').replace(/50x50\.jpg$/, '500x500.jpg')
           : '/icons/default-artwork.png';
 
-        const year = parseInt(item.year, 10) || new Date().getFullYear();
-        const duration = parseInt(item.duration, 10) || 210;
-        const playCount = parseInt(item.play_count, 10) || 0;
+        const year = parseInt(item.year || item.more_info?.year, 10) || new Date().getFullYear();
+        const duration = parseInt(item.duration || item.more_info?.duration, 10) || 210;
+        const playCount = parseInt(item.play_count || item.more_info?.play_count, 10) || 0;
 
         tracks.push({
           id: `saavn-${item.id}`,
@@ -582,10 +588,10 @@ export class IndianMusicProvider implements CatalogueProvider {
     try {
       const url = `${SAAVN_API_BASE}?__call=song.getDetails&pids=${encodeURIComponent(
         rawId
-      )}&_format=json&_marker=0&cc=in`;
+      )}&_format=json&_marker=0&api_version=4&ctx=web6dot0&cc=in&languages=malayalam,tamil,hindi,english,telugu,kannada`;
 
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+        headers: SAAVN_HEADERS,
       });
       if (!res.ok) return null;
       const json = await res.json();

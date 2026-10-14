@@ -8,6 +8,41 @@ export interface FeaturedSoundtrack extends AlbumSummary {
 
 export const FEATURED_SOUNDTRACKS: FeaturedSoundtrack[] = [
   {
+    id: 'saavn-album-79185630',
+    title: 'Prince And Family',
+    artistName: 'Sanal Dev',
+    coverImage: 'https://c.saavncdn.com/608/Prince-And-Family-Malayalam-2025-20260812211736-500x500.jpg',
+    releaseYear: 2025,
+    genre: 'Malayalam / Soundtrack',
+    totalTracks: 4,
+    isHiRes: false,
+    isLossless: true,
+    artist: { id: 'saavn-artist-sanal-dev', name: 'Sanal Dev' },
+    trackTitles: [
+      'The Life Of Prince - Maayunnallo',
+      'The Song Of Prince - Heartbeat Koodanu',
+      'Rani Meri Rani',
+      'Moonnilu Moothon Prince',
+    ],
+  },
+  {
+    id: 'saavn-album-79186470',
+    title: 'The Life Of Prince - Maayunnallo (From "Prince And Family")',
+    artistName: 'Sanal Dev',
+    coverImage: 'https://c.saavncdn.com/916/The-Life-Of-Prince-Maayunnallo-From-Prince-And-Family-Malayalam-2025-20260812211736-500x500.jpg',
+    releaseYear: 2025,
+    genre: 'Malayalam / Soundtrack',
+    totalTracks: 1,
+    isHiRes: false,
+    isLossless: true,
+    artist: { id: 'saavn-artist-sanal-dev', name: 'Sanal Dev' },
+    trackTitles: [
+      'The Life Of Prince - Maayunnallo',
+      'The Life Of Prince',
+      'Maayunnallo',
+    ],
+  },
+  {
     id: 'saavn-album-79759837',
     title: 'Bethlehem Kudumba Unit',
     artistName: 'Vishnu Vijay',

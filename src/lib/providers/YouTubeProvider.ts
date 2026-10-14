@@ -32,14 +32,14 @@ function parseDurationToSeconds(durationText?: string): number {
 
 export async function searchYouTubeVideos(query: string, limit = 15): Promise<any[]> {
   try {
-    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&gl=IN&hl=en-GB`;
     const res = await fetch(searchUrl, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Language': 'en-IN,en;q=0.9,ml;q=0.8,ta;q=0.7',
       },
-      next: { revalidate: 3600 },
+      cache: 'no-store',
     });
 
     if (!res.ok) return [];
