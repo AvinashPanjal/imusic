@@ -65,10 +65,16 @@ export default function PlaylistDetailPage() {
     }
   };
 
-  const handleDeletePlaylist = async () => {
-    if (!confirm('Are you sure you want to delete this playlist?')) return;
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const handleDeletePlaylist = () => {
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeletePlaylist = async () => {
     LocalLibrary.deletePlaylist(id);
     fetch(`/api/playlists/${id}`, { method: 'DELETE' }).catch(() => {});
+    setShowDeleteModal(false);
     router.push('/library');
   };
 
@@ -158,6 +164,34 @@ export default function PlaylistDetailPage() {
           </div>
         )}
       </section>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowDeleteModal(false)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <h3>Delete Playlist</h3>
+            <p className={styles.modalDescription}>
+              Are you sure you want to delete this playlist? This action cannot be undone.
+            </p>
+            <div className={styles.modalBtnRow}>
+              <button
+                type="button"
+                className={styles.cancelBtn}
+                onClick={() => setShowDeleteModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.deleteConfirmBtn}
+                onClick={confirmDeletePlaylist}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ export default function SettingsPage() {
   const [downloadQuality, setDownloadQuality] = useState('lossless');
   const [storageUsage, setStorageUsage] = useState({ usedMB: 0, quotaMB: 0 });
   const [savedNotice, setSavedNotice] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   useEffect(() => {
     setCurrentTheme(getStoredTheme());
@@ -46,7 +47,6 @@ export default function SettingsPage() {
             setDownloadQuality(data.settings.downloadQuality || 'lossless');
           }
         }
-
         const est = await OfflineDownloadManager.getStorageEstimate();
         setStorageUsage({
           usedMB: Math.round(est.usedBytes / (1024 * 1024)),
@@ -82,7 +82,6 @@ export default function SettingsPage() {
   };
 
   const handleClearOffline = async () => {
-    if (!confirm('Clear all downloaded offline tracks from this device?')) return;
     try {
       const tracks = await OfflineDownloadManager.getAllDownloadedTracks();
       for (const t of tracks) {
@@ -93,7 +92,9 @@ export default function SettingsPage() {
         usedMB: Math.round(est.usedBytes / (1024 * 1024)),
         quotaMB: Math.round(est.quotaBytes / (1024 * 1024)),
       });
-      alert('Offline storage successfully cleared');
+      setShowClearConfirm(false);
+      setSavedNotice(true);
+      setTimeout(() => setSavedNotice(false), 2000);
     } catch (err) {
       console.error('Clear offline storage error:', err);
     }
@@ -234,13 +235,34 @@ export default function SettingsPage() {
             <span>Allocated Quota: {Math.round(storageUsage.quotaMB / 1024)} GB</span>
           </div>
 
-          <button
-            type="button"
-            className={styles.dangerBtn}
-            onClick={handleClearOffline}
-          >
-            <Trash2 size={16} /> Clear Offline Downloaded Tracks
-          </button>
+          {showClearConfirm ? (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '6px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Are you sure you want to delete all offline tracks?</span>
+              <button
+                type="button"
+                className={styles.dangerBtn}
+                style={{ background: '#ef4444', color: '#fff' }}
+                onClick={handleClearOffline}
+              >
+                Yes, Clear All
+              </button>
+              <button
+                type="button"
+                className={styles.select}
+                onClick={() => setShowClearConfirm(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={styles.dangerBtn}
+              onClick={() => setShowClearConfirm(true)}
+            >
+              <Trash2 size={16} /> Clear Offline Downloaded Tracks
+            </button>
+          )}
         </div>
       </section>
 

@@ -47,6 +47,7 @@ export default function LibraryPage() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
+  const [playlistToDelete, setPlaylistToDelete] = useState<{ id: string; title: string } | null>(null);
 
   // Import Playlist Modal State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -244,18 +245,21 @@ export default function LibraryPage() {
     }
   };
 
-  const handleDeletePlaylist = async (e: React.MouseEvent, playlistId: string, playlistTitle: string) => {
+  const handleDeletePlaylist = (e: React.MouseEvent, playlistId: string, playlistTitle: string) => {
     e.preventDefault();
     e.stopPropagation();
+    setPlaylistToDelete({ id: playlistId, title: playlistTitle });
+  };
 
-    if (!confirm(`Are you sure you want to delete "${playlistTitle}"?`)) return;
-
-    LocalLibrary.deletePlaylist(playlistId);
-    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
-
-    fetch(`/api/playlists/${playlistId}`, {
+  const confirmDeletePlaylist = () => {
+    if (!playlistToDelete) return;
+    const { id } = playlistToDelete;
+    LocalLibrary.deletePlaylist(id);
+    setPlaylists((prev) => prev.filter((p) => p.id !== id));
+    fetch(`/api/playlists/${id}`, {
       method: 'DELETE',
     }).catch(() => {});
+    setPlaylistToDelete(null);
   };
 
   // Sort helper
@@ -582,6 +586,35 @@ export default function LibraryPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Playlist Confirmation Modal */}
+      {playlistToDelete && (
+        <div className={styles.modalOverlay} onClick={() => setPlaylistToDelete(null)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <h3>Delete Playlist</h3>
+            <p className={styles.modalDescription}>
+              Are you sure you want to delete &ldquo;{playlistToDelete.title}&rdquo;? This cannot be undone.
+            </p>
+            <div className={styles.modalBtnRow}>
+              <button
+                type="button"
+                className={styles.cancelBtn}
+                onClick={() => setPlaylistToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.submitBtn}
+                style={{ backgroundColor: '#ef4444' }}
+                onClick={confirmDeletePlaylist}
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

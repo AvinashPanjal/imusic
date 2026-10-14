@@ -446,14 +446,17 @@ export const AudioEngine: React.FC = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            trackId: track.id,
-            title: track.title,
-            artist: track.artists?.[0]?.name,
-            album: track.album?.title,
+            trackId: track.id || '',
+            title: track.title || '',
+            artist: track.artists?.[0]?.name || '',
+            album: track.album?.title || '',
           }),
         });
         if (res.ok) {
           const data = await res.json();
+          if (data.youtubeId) {
+            return data.streamUrl || `/api/stream/yt?v=${data.youtubeId}`;
+          }
           if (data.streamUrl) {
             return data.streamUrl;
           }
@@ -583,6 +586,13 @@ export const AudioEngine: React.FC = () => {
         }
         setError('Audio stream unavailable for this track');
         setIsLoading(false);
+        return;
+      }
+
+      const resYtId = extractYouTubeId({ streamUrl: resolvedUrl });
+      if (resYtId && (isVercel || directStreamFailedRef.current)) {
+        console.log(`Resolved stream is YouTube (${resYtId}). Playing via client player engine.`);
+        playViaYouTubePlayer(resYtId);
         return;
       }
 
@@ -772,8 +782,8 @@ export const AudioEngine: React.FC = () => {
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
-      // If this track has a YouTube video ID, seamlessly switch to client YouTube player!
-      const ytId = extractYouTubeId(currentTrack);
+      // If this track or current audio.src has a YouTube video ID, seamlessly switch to client YouTube player!
+      const ytId = extractYouTubeId(currentTrack) || (audio.src ? extractYouTubeId({ streamUrl: audio.src }) : null);
       if (ytId) {
         console.log(`Direct audio stream failed for ${ytId}. Seamlessly switching to YouTube client engine.`);
         directStreamFailedRef.current = true;
@@ -786,12 +796,21 @@ export const AudioEngine: React.FC = () => {
         console.log(`Attempting stream recovery for track: ${currentTrack.title}`);
         try {
           const freshUrl = await resolveTrackUrl(currentTrack, true);
-          if (freshUrl && audio) {
-            console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
-            audio.src = freshUrl;
-            audio.load();
-            audio.play().catch(() => {});
-            return;
+          if (freshUrl) {
+            const freshYt = extractYouTubeId({ streamUrl: freshUrl });
+            if (freshYt && (isVercelEnvironment() || directStreamFailedRef.current)) {
+              console.log(`Alternative stream recovered as YouTube (${freshYt}). Seamlessly switching to client player.`);
+              directStreamFailedRef.current = true;
+              playViaYouTubePlayer(freshYt);
+              return;
+            }
+            if (audio) {
+              console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
+              audio.src = freshUrl;
+              audio.load();
+              audio.play().catch(() => {});
+              return;
+            }
           }
         } catch (recoverErr) {
           console.warn('Alternative stream recovery attempt failed:', recoverErr);

@@ -11,11 +11,11 @@ import {
 import { z } from 'zod';
 
 const ResolveSchema = z.object({
-  trackId: z.string().min(1),
-  preferredQuality: z.enum(['auto', 'standard', 'high', 'lossless', 'hires']).optional(),
-  title: z.string().optional(),
-  artist: z.string().optional(),
-  album: z.string().optional(),
+  trackId: z.string().optional().nullable(),
+  preferredQuality: z.string().optional().nullable(),
+  title: z.string().optional().nullable(),
+  artist: z.string().optional().nullable(),
+  album: z.string().optional().nullable(),
 });
 
 async function resolveJioSaavnStream(
@@ -216,23 +216,32 @@ async function resolveAnyPlayableStream(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const parsed = ResolveSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid request body', details: parsed.error.issues }, { status: 400 });
     }
 
-    const { trackId, preferredQuality = 'auto', title, artist, album } = parsed.data;
+    const trackId = (parsed.data.trackId || '').trim();
+    const preferredQuality = parsed.data.preferredQuality || 'auto';
+    const title = (parsed.data.title || '').trim();
+    const artist = (parsed.data.artist || '').trim();
+    const album = (parsed.data.album || '').trim();
 
-    // If this is a YouTube track ID or foreign imported track:
-    if (trackId.startsWith('yt-') || trackId.startsWith('foreign-')) {
+    if (!trackId && !title) {
+      return NextResponse.json({ error: 'Either trackId or title is required' }, { status: 400 });
+    }
+
+    // If this is a YouTube track ID or verified foreign YouTube ID:
+    if (trackId.startsWith('yt-') || (trackId.startsWith('foreign-') && /^[a-zA-Z0-9_-]{11}$/.test(trackId.replace('foreign-', '')))) {
       const vid = trackId.replace(/^(yt-|foreign-)/, '');
       const rawTitle = title || '';
 
       // Direct native YouTube audio stream - never substitute with different songs!
       return NextResponse.json({
         streamUrl: `/api/stream/yt?v=${vid}`,
+        youtubeId: vid,
         trackId,
         title: rawTitle || 'YouTube Audio Track',
         recovered: false,
@@ -274,8 +283,10 @@ export async function POST(request: NextRequest) {
       const fallback = await resolveAnyPlayableStream(title, artist, album);
       if (fallback) {
         const isYt = fallback.streamUrl.startsWith('/api/stream/yt');
+        const ytId = isYt ? fallback.streamUrl.match(/v=([\w-]{11})/)?.[1] : undefined;
         return NextResponse.json({
           streamUrl: fallback.streamUrl,
+          youtubeId: ytId,
           trackId,
           title: fallback.title || title || 'Audio Track',
           recovered: true,
@@ -291,19 +302,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const track = await prisma.track.findUnique({
-      where: { id: trackId },
-      include: {
-        assets: true,
-        providerLinks: {
-          include: { provider: true },
-        },
-        artists: {
-          include: { artist: true },
-        },
-        album: true,
-      },
-    });
+    const track = trackId
+      ? await prisma.track
+          .findUnique({
+            where: { id: trackId },
+            include: {
+              assets: true,
+              providerLinks: {
+                include: { provider: true },
+              },
+              artists: {
+                include: { artist: true },
+              },
+              album: true,
+            },
+          })
+          .catch(() => null)
+      : null;
 
     if (track) {
       // Record play count and history
@@ -378,6 +393,7 @@ export async function POST(request: NextRequest) {
         if (ytMatch) {
           return NextResponse.json({
             streamUrl: `/api/stream/yt?v=${ytMatch[1]}`,
+            youtubeId: ytMatch[1],
             trackId: track.id,
             title: track.title,
             asset: {
@@ -398,8 +414,10 @@ export async function POST(request: NextRequest) {
       const resolved = await resolveAnyPlayableStream(track.title || title, artistName, albumName);
       if (resolved) {
         const isYt = resolved.streamUrl.startsWith('/api/stream/yt');
+        const ytId = isYt ? resolved.streamUrl.match(/v=([\w-]{11})/)?.[1] : undefined;
         return NextResponse.json({
           streamUrl: resolved.streamUrl,
+          youtubeId: ytId,
           trackId: track.id,
           title: resolved.title || track.title,
           recovered: true,
@@ -443,8 +461,10 @@ export async function POST(request: NextRequest) {
     const resolved = await resolveAnyPlayableStream(title, artist, album);
     if (resolved) {
       const isYt = resolved.streamUrl.startsWith('/api/stream/yt');
+      const ytId = isYt ? resolved.streamUrl.match(/v=([\w-]{11})/)?.[1] : undefined;
       return NextResponse.json({
         streamUrl: resolved.streamUrl,
+        youtubeId: ytId,
         trackId,
         title: resolved.title || title || 'Audio Track',
         recovered: true,

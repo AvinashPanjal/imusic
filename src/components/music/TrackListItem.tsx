@@ -55,7 +55,7 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
       await OfflineDownloadManager.downloadTrack(track);
       setIsDownloaded(true);
     } catch (err) {
-      alert((err as Error).message || 'Failed to download track');
+      console.warn('Failed to download track:', (err as Error).message || err);
     } finally {
       setIsDownloading(false);
     }
