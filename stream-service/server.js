@@ -18,14 +18,23 @@ function resolveWithYtDlp(videoId) {
     }
 
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const proc = spawn('yt-dlp', [
+    const args = [
       '-g',
+      '--extractor-args',
+      'youtube:player_client=android,web',
       '-f',
-      'bestaudio[ext=m4a]/bestaudio/best',
+      'bestaudio[ext=m4a]/bestaudio/18/b/best',
       '--no-warnings',
       '--no-check-certificates',
-      videoUrl,
-    ]);
+    ];
+
+    if (process.env.YOUTUBE_COOKIE) {
+      args.push('--add-header', `Cookie:${process.env.YOUTUBE_COOKIE}`);
+    }
+
+    args.push(videoUrl);
+
+    const proc = spawn('yt-dlp', args);
 
     let stdout = '';
     let stderr = '';
@@ -48,7 +57,31 @@ function resolveWithYtDlp(videoId) {
         urlCache.set(videoId, info);
         resolve(info);
       } else {
-        reject(new Error(`yt-dlp failed (code ${code}): ${stderr || 'No stream URL produced'}`));
+        // Fallback without extractorArgs in case android client is ever throttled
+        const fallbackProc = spawn('yt-dlp', [
+          '-g',
+          '-f',
+          'ba/b/18/best',
+          '--no-warnings',
+          videoUrl,
+        ]);
+
+        let fbStdout = '';
+        fallbackProc.stdout.on('data', (c) => { fbStdout += c.toString(); });
+        fallbackProc.on('close', (fbCode) => {
+          if (fbCode === 0 && fbStdout.trim().startsWith('http')) {
+            const streamUrl = fbStdout.trim().split('\n')[0].trim();
+            const info = {
+              url: streamUrl,
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+            };
+            urlCache.set(videoId, info);
+            resolve(info);
+          } else {
+            reject(new Error(`yt-dlp failed (code ${code}): ${stderr || 'No stream URL produced'}`));
+          }
+        });
+        fallbackProc.on('error', (fbErr) => reject(fbErr));
       }
     });
 
@@ -63,7 +96,7 @@ app.get('/', (req, res) => {
   res.json({
     service: 'imusic-stream-service',
     status: 'online',
-    version: '1.0.0',
+    version: '1.1.0',
     timestamp: new Date().toISOString(),
   });
 });
@@ -100,6 +133,16 @@ app.get('/stream', async (req, res) => {
     return res.status(400).json({ error: 'Valid 11-character YouTube video ID required (?v=...)' });
   }
 
+  // Redirect mode if requested
+  if (req.query.redirect === 'true') {
+    try {
+      const info = await resolveWithYtDlp(videoId);
+      return res.redirect(302, info.url);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     const info = await resolveWithYtDlp(videoId);
     const clientRange = req.headers.range || 'bytes=0-';
@@ -120,12 +163,12 @@ app.get('/stream', async (req, res) => {
       return res.status(upstreamRes.status).send('Upstream stream error');
     }
 
-    const contentType = upstreamRes.headers.get('content-type') || 'audio/mp4';
+    const upstreamType = upstreamRes.headers.get('content-type') || 'audio/mp4';
     const contentLength = upstreamRes.headers.get('content-length');
     const contentRange = upstreamRes.headers.get('content-range');
 
     res.status(upstreamRes.status);
-    res.setHeader('Content-Type', contentType.startsWith('audio/') ? contentType : 'audio/mp4');
+    res.setHeader('Content-Type', upstreamType.startsWith('video/') ? 'video/mp4' : (upstreamType.startsWith('audio/') ? upstreamType : 'audio/mp4'));
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=14400, immutable');
 
@@ -145,7 +188,7 @@ app.get('/stream', async (req, res) => {
           }
         }
         res.end();
-      } catch (streamErr) {
+      } catch {
         res.end();
       }
     };
