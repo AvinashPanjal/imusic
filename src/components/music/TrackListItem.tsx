@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { TrackData } from '@/types/music';
 import { usePlayerStore } from '@/store/playerStore';
-import { Play, Pause, MoreVertical, Plus, Heart, Download, Check, Sparkles, ExternalLink } from 'lucide-react';
+import { Play, Pause, MoreVertical, Plus, Heart, Download, Check, Sparkles } from 'lucide-react';
 import { formatTime } from '@/lib/lyrics';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
 import styles from './TrackListItem.module.css';
@@ -36,12 +36,6 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
   const isLossless = asset?.isLossless || asset?.codec === 'FLAC';
 
   const handleRowClick = () => {
-    // If commercial handoff, open external link
-    if (track.externalUrl && !track.assets?.length) {
-      window.open(track.externalUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
     if (isCurrent) {
       togglePlay();
     } else {
@@ -117,11 +111,6 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
               Lossless
             </span>
           ) : null}
-          {track.externalUrl && (
-            <span className={styles.badgeHandoff} title="External Official Provider">
-              <ExternalLink size={9} /> Handoff
-            </span>
-          )}
         </div>
         <div className={styles.artistRow}>
           <span className={styles.artist}>{artistNames}</span>

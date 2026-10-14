@@ -44,7 +44,8 @@ export const AudioEngine: React.FC = () => {
       track.id?.startsWith('yt-') ||
       track.providerCode === 'youtube' ||
       track.streamUrl?.startsWith('youtube:') ||
-      track.assets?.[0]?.storageKey?.startsWith('youtube:')
+      track.assets?.[0]?.storageKey?.startsWith('youtube:') ||
+      (track.externalUrl && /(?:youtu\.be\/|youtube\.com)/.test(track.externalUrl))
     );
   }, []);
 
@@ -59,6 +60,10 @@ export const AudioEngine: React.FC = () => {
     }
     if (track.id?.startsWith('yt-')) {
       return track.id.replace('yt-', '');
+    }
+    if (track.externalUrl) {
+      const match = track.externalUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})/);
+      if (match) return match[1];
     }
     return null;
   }, []);
