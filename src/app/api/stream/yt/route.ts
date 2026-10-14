@@ -26,6 +26,8 @@ async function getInnertube() {
   return innertubeInstance;
 }
 
+let lastResolveError: string = '';
+
 // Pure Node.js stream decipherer with multi-client format fallback
 async function resolveViaInnertube(videoId: string): Promise<CachedStream | null> {
   const clients = ['VISIONOS', 'YTMUSIC', 'ANDROID', 'ANDROID_VR', 'IOS'] as const;
@@ -45,13 +47,19 @@ async function resolveViaInnertube(videoId: string): Promise<CachedStream | null
               contentLength: fmt.content_length || 3500000,
               expiresAt: Date.now() + 4 * 3600 * 1000,
             };
+          } else {
+            lastResolveError += `[${clientName} no directUrl: ${String(directUrl)}] `;
           }
+        } else {
+          lastResolveError += `[${clientName} no audio fmt] `;
         }
-      } catch (clientErr) {
+      } catch (clientErr: any) {
+        lastResolveError += `[${clientName}: ${clientErr?.message || clientErr}] `;
         continue;
       }
     }
-  } catch (err) {
+  } catch (err: any) {
+    lastResolveError += `[Innertube outer: ${err?.message || err}] `;
     console.warn('Innertube resolve error:', err);
     innertubeInstance = null; // Recreate session on next call if it became invalid
   }
@@ -163,7 +171,10 @@ export async function GET(request: NextRequest) {
     // Resolve direct audio stream URL
     const streamInfo = await resolveAudioStreamUrl(videoId);
     if (!streamInfo) {
-      return NextResponse.json({ error: 'Could not resolve playable audio stream' }, { status: 404 });
+      return NextResponse.json({
+        error: 'Could not resolve playable audio stream',
+        diagnostics: lastResolveError || 'no resolver succeeded',
+      }, { status: 404 });
     }
 
     // Forward HTTP Range header for seeking and partial buffering (default to bytes=0- to prevent 403 on open downloads)

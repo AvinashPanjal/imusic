@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  serverExternalPackages: ['youtubei.js', 'youtube-dl-exec'],
   experimental: {
+    serverComponentsExternalPackages: ['youtubei.js', 'youtube-dl-exec'],
     outputFileTracingIncludes: {
       '/api/**/*': ['./node_modules/youtube-dl-exec/bin/**/*', './prisma/dev.db'],
     },
