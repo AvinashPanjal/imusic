@@ -37,6 +37,7 @@ export const AudioEngine: React.FC = () => {
     setError,
     setNetworkInterrupted,
     updatePlaybackProgress,
+    isFullScreenPlayerOpen,
   } = usePlayerStore();
 
   const isYouTubeTrack = useCallback((track: typeof currentTrack): boolean => {
@@ -216,139 +217,284 @@ export const AudioEngine: React.FC = () => {
     } catch {}
   }, [currentTrack, isYouTubeTrack]);
 
-  // Initialize YouTube IFrame Player
+  // Helper to ensure persistent container for YouTube exists and is configured
+  const ensureYtContainer = useCallback(() => {
+    if (typeof window === 'undefined') return null;
+    let container = document.getElementById('imusic-yt-persistent-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'imusic-yt-persistent-container';
+      container.style.position = 'fixed';
+      container.style.bottom = '84px';
+      container.style.right = '16px';
+      container.style.width = '280px';
+      container.style.height = '158px';
+      container.style.zIndex = '95';
+      container.style.borderRadius = '12px';
+      container.style.overflow = 'hidden';
+      container.style.boxShadow = '0 12px 32px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.12)';
+      container.style.background = '#0a0a0f';
+      container.style.transition = 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+      container.style.display = 'none';
+
+      // Header bar with label and minimize button
+      const header = document.createElement('div');
+      header.id = 'imusic-yt-header';
+      header.style.position = 'absolute';
+      header.style.top = '0';
+      header.style.left = '0';
+      header.style.right = '0';
+      header.style.height = '26px';
+      header.style.background = 'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)';
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+      header.style.justifyContent = 'space-between';
+      header.style.padding = '0 8px';
+      header.style.zIndex = '10';
+      header.style.pointerEvents = 'auto';
+
+      const titleBadge = document.createElement('span');
+      titleBadge.textContent = '▶ YouTube Video';
+      titleBadge.style.fontSize = '11px';
+      titleBadge.style.fontWeight = '600';
+      titleBadge.style.color = '#fff';
+      titleBadge.style.letterSpacing = '0.4px';
+
+      const minBtn = document.createElement('button');
+      minBtn.textContent = '–';
+      minBtn.style.background = 'none';
+      minBtn.style.border = 'none';
+      minBtn.style.color = '#fff';
+      minBtn.style.fontSize = '16px';
+      minBtn.style.cursor = 'pointer';
+      minBtn.style.padding = '0 4px';
+      minBtn.title = 'Minimize/Expand video';
+
+      let isMinimized = false;
+      minBtn.onclick = (e) => {
+        e.stopPropagation();
+        isMinimized = !isMinimized;
+        if (isMinimized) {
+          container!.style.height = '28px';
+          container!.style.width = '140px';
+          minBtn.textContent = '+';
+        } else {
+          container!.style.height = '158px';
+          container!.style.width = '280px';
+          minBtn.textContent = '–';
+        }
+      };
+
+      header.appendChild(titleBadge);
+      header.appendChild(minBtn);
+      container.appendChild(header);
+
+      const placeholder = document.createElement('div');
+      placeholder.id = 'imusic-yt-iframe';
+      placeholder.style.width = '100%';
+      placeholder.style.height = '100%';
+      container.appendChild(placeholder);
+      document.body.appendChild(container);
+    }
+    return container;
+  }, []);
+
+  // Helper to initialize or load a video into the YouTube player
+  const createOrPlayYouTube = useCallback(
+    (videoId: string) => {
+      if (typeof window === 'undefined' || !videoId) return;
+
+      const container = ensureYtContainer();
+      if (container) {
+        container.style.display = 'block';
+      }
+
+      // Check if YouTube Player instance already exists
+      if (ytPlayerRef.current) {
+        if (isYtReadyRef.current && ytPlayerRef.current.loadVideoById) {
+          try {
+            ytPlayerRef.current.loadVideoById({
+              videoId,
+              startSeconds: 0,
+            });
+            const state = usePlayerStore.getState();
+            const targetVol = state.isMuted ? 0 : Math.round(state.volume * 100);
+            ytPlayerRef.current.setVolume(targetVol);
+            ytPlayerRef.current.playVideo();
+          } catch (playErr) {
+            console.warn('Error loading video on existing player:', playErr);
+          }
+        } else {
+          pendingYtVideoIdRef.current = videoId;
+        }
+        return;
+      }
+
+      // If window.YT.Player is ready, create player with this video ID directly
+      if (window.YT && window.YT.Player) {
+        try {
+          ytPlayerRef.current = new window.YT.Player('imusic-yt-iframe', {
+            height: '100%',
+            width: '100%',
+            videoId,
+            playerVars: {
+              autoplay: 1,
+              controls: 1,
+              playsinline: 1,
+              enablejsapi: 1,
+              origin: typeof window !== 'undefined' ? window.location.origin : '',
+              widget_referrer: typeof window !== 'undefined' ? window.location.origin : '',
+              rel: 0,
+              modestbranding: 1,
+              iv_load_policy: 3,
+              fs: 1,
+            },
+            events: {
+              onReady: (event: any) => {
+                isYtReadyRef.current = true;
+                const vidToPlay = pendingYtVideoIdRef.current || videoId;
+                pendingYtVideoIdRef.current = null;
+                try {
+                  if (vidToPlay && event.target.loadVideoById) {
+                    event.target.loadVideoById({ videoId: vidToPlay, startSeconds: 0 });
+                  }
+                  const state = usePlayerStore.getState();
+                  const targetVol = state.isMuted ? 0 : Math.round(state.volume * 100);
+                  event.target.setVolume(targetVol);
+                  event.target.playVideo();
+                } catch (readyErr) {
+                  console.warn('Error in YT onReady play:', readyErr);
+                }
+              },
+              onStateChange: (event: any) => {
+                // 1: PLAYING, 2: PAUSED, 0: ENDED, 3: BUFFERING
+                if (event.data === 1) {
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                  setNetworkInterrupted(false);
+                  if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'playing';
+                  }
+                } else if (event.data === 2) {
+                  if (!usePlayerStore.getState().isPlaying) {
+                    if ('mediaSession' in navigator) {
+                      navigator.mediaSession.playbackState = 'paused';
+                    }
+                  }
+                } else if (event.data === 3) {
+                  setIsLoading(true);
+                } else if (event.data === 0) {
+                  nextTrack();
+                }
+              },
+              onError: async (err: any) => {
+                console.warn('YouTube playback error event:', err);
+                setIsLoading(false);
+
+                const curr = usePlayerStore.getState().currentTrack;
+                if (curr && retryCountRef.current === 0) {
+                  retryCountRef.current += 1;
+                  console.log(`YouTube playback error encountered, attempting recovery for: ${curr.title}`);
+                  try {
+                    const resolved = await resolveTrackUrl(curr, true);
+                    // ONLY use HTML5 audio if resolved is a real HTTP/HTTPS stream! NEVER assign youtube: to audio.src!
+                    if (resolved && !resolved.startsWith('youtube:') && audioRef.current) {
+                      console.log('Successfully recovered YouTube track via alternative audio stream!');
+                      if (container) container.style.display = 'none';
+                      activeEngineRef.current = 'audio';
+                      audioRef.current.src = resolved;
+                      audioRef.current.load();
+                      audioRef.current.play().catch(() => {});
+                      return;
+                    }
+                  } catch (recErr) {
+                    console.warn('Recovery attempt failed:', recErr);
+                  }
+                }
+
+                // If playback error 101/150 (copyright owner disallows third-party embedding):
+                setError('This video cannot be played on third-party sites due to YouTube copyright restrictions.');
+              },
+            },
+          });
+        } catch (e) {
+          console.warn('Could not initialize YouTube player:', e);
+        }
+      } else {
+        // Queue video until YT Iframe API script loads
+        pendingYtVideoIdRef.current = videoId;
+        if (!document.getElementById('yt-iframe-api-script')) {
+          const tag = document.createElement('script');
+          tag.id = 'yt-iframe-api-script';
+          tag.src = 'https://www.youtube.com/iframe_api';
+          const first = document.getElementsByTagName('script')[0];
+          first?.parentNode?.insertBefore(tag, first);
+        }
+      }
+    },
+    [ensureYtContainer, isMuted, nextTrack, resolveTrackUrl, setError, setIsLoading, setIsPlaying, setNetworkInterrupted, volume]
+  );
+
+  // Initialize YouTube IFrame Player Script and ready callback
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const initYt = () => {
-      if (typeof window === 'undefined') return;
-      if (ytPlayerRef.current || !window.YT?.Player) return;
-
-      // Ensure persistent container exists on document.body outside React Virtual DOM
-      let container = document.getElementById('imusic-yt-persistent-container');
-      if (!container) {
-        container = document.createElement('div');
-        container.id = 'imusic-yt-persistent-container';
-        container.style.position = 'fixed';
-        container.style.bottom = '0px';
-        container.style.right = '0px';
-        container.style.width = '200px';
-        container.style.height = '200px';
-        container.style.opacity = '0.001';
-        container.style.pointerEvents = 'none';
-        container.style.zIndex = '-1';
-
-        const placeholder = document.createElement('div');
-        placeholder.id = 'imusic-yt-iframe';
-        placeholder.style.width = '100%';
-        placeholder.style.height = '100%';
-        container.appendChild(placeholder);
-        document.body.appendChild(container);
-      }
-
-      try {
-        ytPlayerRef.current = new window.YT.Player('imusic-yt-iframe', {
-          height: '200',
-          width: '200',
-          videoId: '',
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            modestbranding: 1,
-            playsinline: 1,
-            enablejsapi: 1,
-          },
-          events: {
-            onReady: () => {
-              isYtReadyRef.current = true;
-              if (pendingYtVideoIdRef.current) {
-                const vid = pendingYtVideoIdRef.current;
-                pendingYtVideoIdRef.current = null;
-                ytPlayerRef.current.loadVideoById(vid);
-                const state = usePlayerStore.getState();
-                const targetVol = state.isMuted ? 0 : Math.round(state.volume * 100);
-                ytPlayerRef.current.setVolume(targetVol);
-                ytPlayerRef.current.playVideo();
-              }
-            },
-            onStateChange: (event: any) => {
-              // 1: PLAYING, 2: PAUSED, 0: ENDED, 3: BUFFERING
-              if (event.data === 1) {
-                setIsPlaying(true);
-                setIsLoading(false);
-                setNetworkInterrupted(false);
-                if ('mediaSession' in navigator) {
-                  navigator.mediaSession.playbackState = 'playing';
-                }
-              } else if (event.data === 2) {
-                if (!usePlayerStore.getState().isPlaying) {
-                  if ('mediaSession' in navigator) {
-                    navigator.mediaSession.playbackState = 'paused';
-                  }
-                }
-              } else if (event.data === 3) {
-                setIsLoading(true);
-              } else if (event.data === 0) {
-                nextTrack();
-              }
-            },
-            onError: async (err: any) => {
-              console.warn('YouTube playback error:', err);
-              // Automatic Recovery: Try resolving track to a 320 KBPS direct stream!
-              const curr = usePlayerStore.getState().currentTrack;
-              if (curr && retryCountRef.current === 0) {
-                retryCountRef.current += 1;
-                console.log(`YouTube playback error encountered, attempting recovery for: ${curr.title}`);
-                try {
-                  const resolved = await resolveTrackUrl(curr, true);
-                  if (resolved && audioRef.current) {
-                    console.log('Successfully recovered stream via alternative audio!');
-                    audioRef.current.src = resolved;
-                    audioRef.current.load();
-                    audioRef.current.play().catch(() => {});
-                    setIsLoading(false);
-                    return;
-                  }
-                } catch (recErr) {
-                  console.warn('Recovery attempt failed:', recErr);
-                }
-              }
-              setIsLoading(false);
-              setError('Audio stream unavailable. Skipping to next track...');
-              setTimeout(() => {
-                nextTrack();
-              }, 1500);
-            },
-          },
-        });
-      } catch (e) {
-        console.warn('Could not initialize YouTube player:', e);
+    const prevCallback = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (prevCallback) prevCallback();
+      if (pendingYtVideoIdRef.current) {
+        createOrPlayYouTube(pendingYtVideoIdRef.current);
       }
     };
 
-    if (window.YT && window.YT.Player) {
-      initYt();
-    } else {
-      const prevCallback = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        if (prevCallback) prevCallback();
-        initYt();
-      };
-      if (!document.getElementById('yt-iframe-api-script')) {
-        const tag = document.createElement('script');
-        tag.id = 'yt-iframe-api-script';
-        tag.src = 'https://www.youtube.com/iframe_api';
-        const first = document.getElementsByTagName('script')[0];
-        first?.parentNode?.insertBefore(tag, first);
-      }
+    if (!document.getElementById('yt-iframe-api-script')) {
+      const tag = document.createElement('script');
+      tag.id = 'yt-iframe-api-script';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const first = document.getElementsByTagName('script')[0];
+      first?.parentNode?.insertBefore(tag, first);
     }
 
     return () => {
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
     };
-  }, [nextTrack, setError, setIsLoading, setIsPlaying, setNetworkInterrupted]);
+  }, [createOrPlayYouTube]);
+
+  // Adjust YouTube player container based on FullScreenPlayer state
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const container = document.getElementById('imusic-yt-persistent-container');
+    if (!container) return;
+
+    if (activeEngineRef.current !== 'yt') {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'block';
+
+    if (isFullScreenPlayerOpen) {
+      // Center in FullScreenPlayer
+      container.style.top = '90px';
+      container.style.bottom = 'auto';
+      container.style.left = '50%';
+      container.style.right = 'auto';
+      container.style.transform = 'translateX(-50%)';
+      container.style.width = 'min(92vw, 420px)';
+      container.style.height = 'min(52vw, 236px)';
+      container.style.zIndex = '1001';
+    } else {
+      // Dock in bottom-right corner above player bar
+      container.style.top = 'auto';
+      container.style.bottom = '84px';
+      container.style.left = 'auto';
+      container.style.right = '16px';
+      container.style.transform = 'none';
+      container.style.width = '280px';
+      container.style.height = '158px';
+      container.style.zIndex = '95';
+    }
+  }, [isFullScreenPlayerOpen]);
 
   // Handle track source changes
   useEffect(() => {
@@ -377,19 +523,7 @@ export const AudioEngine: React.FC = () => {
       }
 
       updateMediaSession(currentTrack);
-
-      if (isYtReadyRef.current && ytPlayerRef.current?.loadVideoById) {
-        try {
-          ytPlayerRef.current.loadVideoById(vid);
-          const targetVol = isMuted ? 0 : Math.round(volume * 100);
-          ytPlayerRef.current.setVolume(targetVol);
-          ytPlayerRef.current.playVideo();
-        } catch (playErr) {
-          console.warn('Error playing YouTube video:', playErr);
-        }
-      } else {
-        pendingYtVideoIdRef.current = vid;
-      }
+      createOrPlayYouTube(vid);
 
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
       ytProgressIntervalRef.current = setInterval(() => {
@@ -408,6 +542,12 @@ export const AudioEngine: React.FC = () => {
     const startAudioPlayback = (streamUrl: string) => {
       if (!active || !audio) return;
       activeEngineRef.current = 'audio';
+
+      // Hide YouTube container when audio is active
+      const container = document.getElementById('imusic-yt-persistent-container');
+      if (container) {
+        container.style.display = 'none';
+      }
 
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
       if (isYtReadyRef.current && ytPlayerRef.current?.pauseVideo) {
@@ -478,6 +618,7 @@ export const AudioEngine: React.FC = () => {
     isYouTubeTrack,
     getYouTubeVideoId,
     resolveTrackUrl,
+    createOrPlayYouTube,
     updateMediaSession,
     updatePlaybackProgress,
     updateMediaSessionPosition,
