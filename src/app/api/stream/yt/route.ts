@@ -26,9 +26,10 @@ async function getInnertube() {
   return innertubeInstance;
 }
 
-// Pure Node.js stream decipherer with client fallback cascade
+// Pure Node.js stream decipherer with VISIONOS client (bypasses signature blocks and allows full range streaming)
 async function resolveViaInnertube(videoId: string): Promise<CachedStream | null> {
-  const clients = ['IOS', 'ANDROID', 'TV', 'YTMUSIC'] as const;
+  // VISIONOS client format allows range streaming and doesn't get 403 on range requests
+  const clients = ['VISIONOS', 'ANDROID_VR', 'IOS'] as const;
 
   try {
     const yt = await getInnertube();
@@ -80,7 +81,7 @@ async function resolveViaYtDlp(videoId: string): Promise<CachedStream | null> {
   return null;
 }
 
-// Master stream resolver: Pure Node.js first, local CLI fallback
+// Master stream resolver: Pure Node.js VISIONOS first, local CLI fallback
 async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | null> {
   // 1. Check memory cache (instant <1ms response)
   const cached = streamUrlCache.get(videoId);
@@ -95,7 +96,7 @@ async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | nu
   }
 
   const resolvePromise = (async () => {
-    // Attempt 1: Pure Node.js Innertube with iOS client (Works 100% on Vercel without external binaries)
+    // Attempt 1: Pure Node.js Innertube with VISIONOS client (Works 100% on Vercel without external binaries)
     const streamInfo = await resolveViaInnertube(videoId);
     if (streamInfo) {
       streamUrlCache.set(videoId, streamInfo);
@@ -165,15 +166,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Could not resolve playable audio stream' }, { status: 404 });
     }
 
-    // Forward HTTP Range header for seeking and partial buffering
-    const rangeHeader = request.headers.get('range');
+    // Forward HTTP Range header for seeking and partial buffering (default to bytes=0- to prevent 403 on open downloads)
+    const clientRange = request.headers.get('range');
+    const upstreamRange = clientRange || 'bytes=0-';
+
     const upstreamHeaders: Record<string, string> = {
+      Range: upstreamRange,
       'User-Agent':
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
     };
-    if (rangeHeader) {
-      upstreamHeaders['Range'] = rangeHeader;
-    }
 
     const upstreamRes = await fetch(streamInfo.url, {
       method: 'GET',
