@@ -41,3 +41,6 @@ dev.db
 dev.db-journal
 storage/audio/*
 !storage/audio/.gitkeep
+
+# local audio cache
+.cache/

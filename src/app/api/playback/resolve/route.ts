@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptMediaUrl, getQueryVariants, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
 import { cleanSongTitle } from '@/lib/constants/soundtracks';
+import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
 import { z } from 'zod';
 
 const ResolveSchema = z.object({
@@ -112,7 +113,7 @@ async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
   return null;
 }
 
-// Universal Playable Stream Resolver: JioSaavn 320 KBPS Studio AAC
+// Universal Playable Stream Resolver: JioSaavn 320 KBPS Studio AAC first, YouTube direct audio stream fallback
 async function resolveAnyPlayableStream(
   title?: string,
   artist?: string
@@ -151,6 +152,7 @@ async function resolveAnyPlayableStream(
     }
   }
 
+  // 1. Try JioSaavn for 320 KBPS CD Quality AAC
   for (const query of Array.from(candidateQueries).slice(0, 6)) {
     try {
       const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=8&q=${encodeURIComponent(query)}`;
@@ -181,6 +183,20 @@ async function resolveAnyPlayableStream(
     } catch {}
   }
 
+  // 2. Fallback to YouTube for full-length native audio stream
+  const ytQuery = `${clean || songTitle} ${artist || ''}`.trim();
+  if (ytQuery.length >= 2) {
+    try {
+      const ytVideos = await searchYouTubeVideos(ytQuery, 1);
+      if (ytVideos.length > 0 && ytVideos[0].id) {
+        return {
+          streamUrl: `/api/stream/yt?v=${ytVideos[0].id}`,
+          title: ytVideos[0].title || songTitle,
+        };
+      }
+    } catch {}
+  }
+
   return null;
 }
 
@@ -195,32 +211,49 @@ export async function POST(request: NextRequest) {
 
     const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
 
-    // If this is a YouTube track ID or foreign imported track, resolve to verified 320 KBPS studio AAC on JioSaavn
+    // If this is a YouTube track ID or foreign imported track:
     if (trackId.startsWith('yt-') || trackId.startsWith('foreign-')) {
+      const vid = trackId.replace(/^yt-/, '');
       const rawTitle = title || '';
-      const resolved = await resolveAnyPlayableStream(rawTitle, artist);
-      if (resolved?.streamUrl) {
-        return NextResponse.json({
-          streamUrl: resolved.streamUrl,
-          trackId,
-          title: resolved.title || rawTitle || 'Audio Track',
-          recovered: true,
-          asset: {
-            id: `asset-${trackId}`,
-            format: 'mp4',
-            codec: 'AAC',
-            bitDepth: 16,
-            sampleRate: 44100,
-            bitrate: 320,
-            isLossless: true,
-            isHiRes: false,
-          },
-        });
+
+      // 1. Try to upgrade to 320 KBPS Studio AAC on JioSaavn if exact song exists
+      if (rawTitle) {
+        const candidate = await resolveAnyPlayableStream(rawTitle, artist);
+        if (candidate && !candidate.streamUrl.startsWith('/api/stream/yt')) {
+          return NextResponse.json({
+            streamUrl: candidate.streamUrl,
+            trackId,
+            title: candidate.title,
+            recovered: true,
+            asset: {
+              id: `asset-${trackId}`,
+              format: 'mp4',
+              codec: 'AAC',
+              bitDepth: 16,
+              sampleRate: 44100,
+              bitrate: 320,
+              isLossless: true,
+              isHiRes: false,
+            },
+          });
+        }
       }
 
+      // 2. Direct native YouTube audio stream
       return NextResponse.json({
-        error: 'No playable studio stream found for this track',
-      }, { status: 404 });
+        streamUrl: `/api/stream/yt?v=${vid}`,
+        trackId,
+        title: rawTitle || 'YouTube Audio Track',
+        recovered: false,
+        asset: {
+          id: `yt-asset-${vid}`,
+          format: 'm4a',
+          codec: 'AAC',
+          bitrate: 160,
+          isLossless: false,
+          isHiRes: false,
+        },
+      });
     }
 
     // Check if this is a JioSaavn external track
@@ -246,9 +279,10 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // If JioSaavn ID failed, fallback to universal search across JioSaavn
+      // If JioSaavn ID failed, fallback to universal search across JioSaavn or YouTube
       const fallback = await resolveAnyPlayableStream(title, artist);
       if (fallback) {
+        const isYt = fallback.streamUrl.startsWith('/api/stream/yt');
         return NextResponse.json({
           streamUrl: fallback.streamUrl,
           trackId,
@@ -258,8 +292,8 @@ export async function POST(request: NextRequest) {
             id: `recovered-asset-${rawId}`,
             format: 'mp4',
             codec: 'AAC',
-            bitrate: 320,
-            isLossless: true,
+            bitrate: isYt ? 160 : 320,
+            isLossless: !isYt,
             isHiRes: false,
           },
         });
@@ -305,8 +339,11 @@ export async function POST(request: NextRequest) {
         }
 
         let streamUrl = `/api/stream/${selectedAsset.id}`;
-        if (selectedAsset.storageType === 'remote_stream' && !selectedAsset.storageKey.startsWith('youtube:')) {
-          streamUrl = selectedAsset.storageKey;
+        if (selectedAsset.storageType === 'remote_stream') {
+          streamUrl = selectedAsset.storageKey.startsWith('youtube:')
+            ? `/api/stream/yt?v=${selectedAsset.storageKey.replace('youtube:', '')}`
+            : selectedAsset.storageKey;
+
           return NextResponse.json({
             streamUrl,
             trackId: track.id,
@@ -343,11 +380,32 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Check if externalUrl points to YouTube
+      const externalLink = track.providerLinks.find((p) => p.externalUrl)?.externalUrl;
+      if (externalLink) {
+        const ytMatch = externalLink.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})/);
+        if (ytMatch) {
+          return NextResponse.json({
+            streamUrl: `/api/stream/yt?v=${ytMatch[1]}`,
+            trackId: track.id,
+            title: track.title,
+            asset: {
+              id: `yt-link-${ytMatch[1]}`,
+              format: 'm4a',
+              codec: 'AAC',
+              bitrate: 160,
+              isLossless: false,
+              isHiRes: false,
+            },
+          });
+        }
+      }
+
       // Universal Playable Fallback for tracks without direct assets or marked as handoff:
-      // Auto-resolve to 320 KBPS Studio AAC from JioSaavn
       const artistName = track.artists?.[0]?.artist?.name || artist;
       const resolved = await resolveAnyPlayableStream(track.title || title, artistName);
       if (resolved) {
+        const isYt = resolved.streamUrl.startsWith('/api/stream/yt');
         return NextResponse.json({
           streamUrl: resolved.streamUrl,
           trackId: track.id,
@@ -357,8 +415,8 @@ export async function POST(request: NextRequest) {
             id: `resolved-${track.id}`,
             format: 'mp4',
             codec: 'AAC',
-            bitrate: 320,
-            isLossless: true,
+            bitrate: isYt ? 160 : 320,
+            isLossless: !isYt,
             isHiRes: false,
           },
         });
@@ -387,9 +445,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. Universal Playable Fallback via JioSaavn search
+    // 2. Universal Playable Fallback via JioSaavn or YouTube search
     const resolved = await resolveAnyPlayableStream(title, artist);
     if (resolved) {
+      const isYt = resolved.streamUrl.startsWith('/api/stream/yt');
       return NextResponse.json({
         streamUrl: resolved.streamUrl,
         trackId,
@@ -399,8 +458,8 @@ export async function POST(request: NextRequest) {
           id: `resolved-${trackId}`,
           format: 'mp4',
           codec: 'AAC',
-          bitrate: 320,
-          isLossless: true,
+          bitrate: isYt ? 160 : 320,
+          isLossless: !isYt,
           isHiRes: false,
         },
       });

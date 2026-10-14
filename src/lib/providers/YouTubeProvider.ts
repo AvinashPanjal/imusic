@@ -126,7 +126,7 @@ export class YouTubeProvider implements CatalogueProvider {
         id: trackId,
         title: cleanTitle,
         duration: durationSeconds,
-        streamUrl: `youtube:${v.id}`,
+        streamUrl: `/api/stream/yt?v=${v.id}`,
         trackNumber: i + 1,
         genre: 'YouTube Music',
         artists: [
@@ -154,7 +154,7 @@ export class YouTubeProvider implements CatalogueProvider {
             isLossless: false,
             isHiRes: false,
             storageType: 'remote_stream',
-            storageKey: `youtube:${v.id}`,
+            storageKey: `/api/stream/yt?v=${v.id}`,
             duration: durationSeconds,
           },
         ],
@@ -189,7 +189,7 @@ export class YouTubeProvider implements CatalogueProvider {
           isLossless: false,
           isHiRes: false,
           storageType: 'remote_stream',
-          storageKey: `youtube:${videoId}`,
+          storageKey: `/api/stream/yt?v=${videoId}`,
         },
       ],
       providerCode: 'youtube',
@@ -199,10 +199,10 @@ export class YouTubeProvider implements CatalogueProvider {
 
   public async getStreamUrl(externalId: string): Promise<string | null> {
     const videoId = externalId.replace(/^yt-/, '');
-    return `youtube:${videoId}`;
+    return `/api/stream/yt?v=${videoId}`;
   }
 
   public getTermsNotice(): string {
-    return 'Music streamed via YouTube public audio embed. 100% Free.';
+    return 'Music streamed via direct native high-quality audio stream. 100% Free.';
   }
 }

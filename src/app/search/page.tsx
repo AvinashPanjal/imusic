@@ -40,16 +40,25 @@ function computeRelevanceScore(
   const normQ = normalizeSearchText(qNoArticle);
   const cleanNormQ = normalizeSearchText(cleanQuery(qNoArticle));
 
+  const baseTitle = cleanNoArticle.split('-')[0].trim();
+  const normBase = normalizeSearchText(baseTitle);
+
   let score = 0;
 
-  // 1. Exact clean match without leading articles (e.g. "life of prince" == "the life of prince")
-  if (normClean === normQ || (cleanNormQ && normClean === cleanNormQ) || normTitle === normQ) {
+  // 1. Exact clean match or base title match without leading articles
+  if (
+    normClean === normQ ||
+    normBase === normQ ||
+    (cleanNormQ && (normClean === cleanNormQ || normBase === cleanNormQ)) ||
+    normTitle === normQ
+  ) {
     score += 1000;
   }
   // 2. Starts with query without leading articles
   else if (
     normClean.startsWith(normQ) ||
-    (cleanNormQ && normClean.startsWith(cleanNormQ)) ||
+    normBase.startsWith(normQ) ||
+    (cleanNormQ && (normClean.startsWith(cleanNormQ) || normBase.startsWith(cleanNormQ))) ||
     normTitle.startsWith(normQ)
   ) {
     score += 500;

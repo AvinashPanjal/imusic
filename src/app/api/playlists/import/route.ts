@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptMediaUrl, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
+import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
 import { TrackData, PlaylistData } from '@/types/music';
 import { z } from 'zod';
 
@@ -412,6 +413,28 @@ async function matchPlayableStream(title: string, artist: string) {
     } catch {
       // Continue to next query
     }
+  }
+
+  // Fallback to YouTube for full-length native audio stream (100% background playback!)
+  try {
+    const ytQuery = `${cleanTitle} ${primaryArtist}`.trim() || title;
+    const ytVideos = await searchYouTubeVideos(ytQuery, 1);
+    if (ytVideos.length > 0 && ytVideos[0].id) {
+      const topYt = ytVideos[0];
+      return {
+        streamUrl: `/api/stream/yt?v=${topYt.id}`,
+        matchedTitle: topYt.title,
+        matchedArtist: topYt.channel || artist,
+        albumTitle: `${title} - Single`,
+        coverImage: topYt.thumbnail,
+        duration: 180,
+        year: new Date().getFullYear(),
+        genre: 'YouTube Music',
+        providerCode: 'youtube',
+      };
+    }
+  } catch (ytErr) {
+    console.warn(`Could not match track "${title}" on YouTube:`, ytErr);
   }
 
   return null;
