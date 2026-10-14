@@ -50,6 +50,23 @@ export function getQueryVariants(q: string): string[] {
   for (const b of bases) {
     const lower = b.toLowerCase();
 
+    // Universal bidirectional 'the' prefix handling
+    if (/^the\s+/i.test(b)) {
+      variants.add(b.replace(/^the\s+/i, '').trim());
+    } else {
+      variants.add(`the ${b}`.trim());
+    }
+
+    // Specific canonicalization for Life of Prince / Prince And Family
+    if (lower.includes('life of prince')) {
+      variants.add('the life of prince');
+      variants.add('prince and family');
+      variants.add('the life of prince maayunnallo');
+    }
+    if (lower.includes('prince and family')) {
+      variants.add('the life of prince');
+    }
+
     // Specific canonicalization for Bethlehem Kudumba Unit
     if (lower.includes('bethleham')) {
       variants.add(b.replace(/bethleham/gi, 'bethlehem'));
@@ -385,22 +402,38 @@ export class IndianMusicProvider implements CatalogueProvider {
       }
 
       // Score and rank tracks with Spotify-grade relevance
+      const stripLeadingArticles = (s: string) => s.toLowerCase().replace(/^(the|a|an)\s+/i, '').trim();
+      const qNoArticle = stripLeadingArticles(q);
       const normQ = normalizeSearchText(q);
-      const cleanNormQ = normalizeSearchText(cleanQuery(q));
+      const normQNoArticle = normalizeSearchText(qNoArticle);
+      const cleanNormQ = normalizeSearchText(cleanQuery(qNoArticle || q));
 
       if (normQ) {
         const scoredTracks = tracks.map((track) => {
           const rawCleanTitle = cleanSongTitle(track.title);
+          const cleanNoArticle = stripLeadingArticles(rawCleanTitle);
+          const baseTitleNoArticle = cleanNoArticle.split('-')[0].trim();
+
+          const normBaseNoArticle = normalizeSearchText(baseTitleNoArticle);
+          const normCleanNoArticle = normalizeSearchText(cleanNoArticle);
           const normCleanTitle = normalizeSearchText(rawCleanTitle);
           const normFullTitle = normalizeSearchText(track.title);
           const normAlbum = normalizeSearchText(track.album?.title || '');
           let score = 0;
 
-          // 1. Exact or clean title match (e.g. searching 'illey illa' matches 'Illey Illa')
-          if (normCleanTitle === normQ || (cleanNormQ && normCleanTitle === cleanNormQ)) {
+          // 1. Exact base or clean title match without leading articles
+          if (normBaseNoArticle === normQNoArticle || (cleanNormQ && normBaseNoArticle === cleanNormQ)) {
+            score += 500;
+          } else if (normCleanNoArticle === normQNoArticle || (cleanNormQ && normCleanNoArticle === cleanNormQ)) {
+            score += 450;
+          } else if (normCleanTitle === normQ || (cleanNormQ && normCleanTitle === cleanNormQ)) {
             score += 350;
+          } else if (normBaseNoArticle.startsWith(normQNoArticle) || normCleanNoArticle.startsWith(normQNoArticle)) {
+            score += 260;
           } else if (normCleanTitle.startsWith(normQ) || (cleanNormQ && normCleanTitle.startsWith(cleanNormQ))) {
             score += 200;
+          } else if (normCleanNoArticle.includes(normQNoArticle)) {
+            score += 150;
           } else if (normCleanTitle.includes(normQ) || (cleanNormQ && normCleanTitle.includes(cleanNormQ))) {
             score += 120;
           } else if (normFullTitle === normQ || (cleanNormQ && normFullTitle === cleanNormQ)) {
@@ -413,6 +446,18 @@ export class IndianMusicProvider implements CatalogueProvider {
             score += 160;
           } else if (fuzzyMatch(track.title, q)) {
             score += 100;
+          }
+
+          // Penalize instrumentals / karaoke / covers unless user searched for them
+          const qLower = q.toLowerCase();
+          if (!qLower.includes('instrumental') && track.title.toLowerCase().includes('instrumental')) {
+            score -= 250;
+          }
+          if (!qLower.includes('karaoke') && track.title.toLowerCase().includes('karaoke')) {
+            score -= 250;
+          }
+          if (!qLower.includes('cover') && track.title.toLowerCase().includes('cover')) {
+            score -= 100;
           }
 
           // 2. Album match bonus

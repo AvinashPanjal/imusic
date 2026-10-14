@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptMediaUrl, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
-import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
 import { TrackData, PlaylistData } from '@/types/music';
 import { z } from 'zod';
 
@@ -341,21 +340,38 @@ function parseRawTracklist(text: string): ParsedPlaylist {
   };
 }
 
-// 5. Helper: Smart match track on JioSaavn (320 KBPS AAC) or fallback to full YouTube audio (Zero preview clips!)
+// 5. Helper: Smart match track on JioSaavn (320 KBPS Studio AAC)
 async function matchPlayableStream(title: string, artist: string) {
   const cleanTitle = cleanTrackTitle(title);
   const primaryArtist = artist.split(/[,&]/)[0].trim();
 
-  // Try JioSaavn with title + artist, then just cleaned title
-  const searchQueries = [
+  // Expanded query permutations for JioSaavn
+  const searchQueries: string[] = [
     `${cleanTitle} ${primaryArtist}`.trim(),
     cleanTitle,
   ];
 
-  for (const q of searchQueries) {
+  if (/^the\s+/i.test(cleanTitle)) {
+    searchQueries.push(cleanTitle.replace(/^the\s+/i, '').trim());
+  } else {
+    searchQueries.push(`The ${cleanTitle}`);
+  }
+
+  if (cleanTitle.includes('-')) {
+    cleanTitle.split('-').forEach((p) => {
+      const pt = p.trim();
+      if (pt.length >= 2) searchQueries.push(pt);
+    });
+  }
+
+  if (title !== cleanTitle) {
+    searchQueries.push(title);
+  }
+
+  for (const q of searchQueries.slice(0, 5)) {
     if (!q) continue;
     try {
-      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(q)}`;
+      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=6&q=${encodeURIComponent(q)}`;
       const res = await fetch(searchUrl, {
         headers: {
           'User-Agent':
@@ -394,31 +410,8 @@ async function matchPlayableStream(title: string, artist: string) {
         }
       }
     } catch {
-      // Continue to next query or YouTube fallback
+      // Continue to next query
     }
-  }
-
-  // Fallback to YouTube for full-length song coverage (NO 30-second clips!)
-  try {
-    const ytQuery = `${cleanTitle} ${primaryArtist}`.trim() || title;
-    const ytVideos = await searchYouTubeVideos(ytQuery, 1);
-    if (ytVideos.length > 0) {
-      const topYt = ytVideos[0];
-      return {
-        streamUrl: `youtube:${topYt.id}`,
-        matchedTitle: topYt.title,
-        matchedArtist: topYt.channel || artist,
-        albumTitle: `${title} - Single`,
-        coverImage: topYt.thumbnail,
-        duration: 180,
-        year: new Date().getFullYear(),
-        genre: 'YouTube Music',
-        providerCode: 'youtube',
-        youtubeId: topYt.id,
-      };
-    }
-  } catch (ytErr) {
-    console.warn(`Could not match track "${title}" on YouTube:`, ytErr);
   }
 
   return null;
@@ -483,14 +476,9 @@ export async function POST(request: NextRequest) {
             const artistName = match?.matchedArtist || item.artist || 'Unknown Artist';
             const albumName = match?.albumTitle || `${trackTitle} - Single`;
             const coverImage = match?.coverImage || item.coverImage || '/icons/default-artwork.png';
-            // CRITICAL: NEVER use previewUrl! Only use full audio stream from JioSaavn or YouTube
             const streamUrl = match?.streamUrl || '';
             const duration = match?.duration || item.duration || 180;
-            const isYt = match?.providerCode === 'youtube' || streamUrl.startsWith('youtube:');
-
-            const trackId = isYt
-              ? `yt-${match?.youtubeId || streamUrl.replace('youtube:', '')}`
-              : `track_${Date.now()}_${globalIdx}`;
+            const trackId = `track_${Date.now()}_${globalIdx}`;
 
             const trackObj: TrackData = {
               id: trackId,
@@ -504,17 +492,17 @@ export async function POST(request: NextRequest) {
                 title: albumName,
                 coverImage,
                 releaseYear: match?.year || new Date().getFullYear(),
-                isLossless: !isYt,
+                isLossless: true,
               },
               assets: streamUrl
                 ? [
                     {
                       id: `asset_${globalIdx}`,
                       trackId,
-                      format: isYt ? 'm4a' : 'mp4',
+                      format: 'mp4',
                       codec: 'AAC',
-                      bitrate: isYt ? 160 : 320,
-                      isLossless: !isYt,
+                      bitrate: 320,
+                      isLossless: true,
                       isHiRes: false,
                       storageType: 'remote_stream',
                       storageKey: streamUrl,
@@ -523,8 +511,7 @@ export async function POST(request: NextRequest) {
                   ]
                 : [],
               streamUrl: streamUrl || undefined,
-              providerCode: isYt ? 'youtube' : 'saavn',
-              externalUrl: isYt ? `https://www.youtube.com/watch?v=${match?.youtubeId}` : undefined,
+              providerCode: 'saavn',
             };
 
             return { trackObj, streamUrl, coverImage };

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { decryptMediaUrl } from '@/lib/providers/IndianMusicProvider';
+import { decryptMediaUrl, getQueryVariants, decodeHtmlEntities } from '@/lib/providers/IndianMusicProvider';
 import { cleanSongTitle } from '@/lib/constants/soundtracks';
-import { searchYouTubeVideos } from '@/lib/providers/YouTubeProvider';
 import { z } from 'zod';
 
 const ResolveSchema = z.object({
@@ -113,30 +112,48 @@ async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
   return null;
 }
 
-// Universal Playable Stream Resolver: JioSaavn 320 KBPS Studio AAC first, YouTube full audio fallback
+// Universal Playable Stream Resolver: JioSaavn 320 KBPS Studio AAC
 async function resolveAnyPlayableStream(
   title?: string,
   artist?: string
-): Promise<{ streamUrl: string; title: string; isYt: boolean } | null> {
+): Promise<{ streamUrl: string; title: string } | null> {
   const songTitle = title || '';
-  const clean = cleanSongTitle(songTitle);
+  if (!songTitle) return null;
 
-  // 1. Try JioSaavn for 320 KBPS Studio AAC with strict title verification
-  const candidateQueries: string[] = [];
+  const clean = cleanSongTitle(songTitle);
+  const candidateQueries = new Set<string>();
+
   if (clean && clean.length >= 2) {
-    candidateQueries.push(clean);
+    candidateQueries.add(clean);
+    if (/^the\s+/i.test(clean)) {
+      candidateQueries.add(clean.replace(/^the\s+/i, '').trim());
+    } else {
+      candidateQueries.add(`The ${clean}`);
+    }
     if (clean.includes('-')) {
-      const parts = clean.split('-').map((p) => p.trim()).filter((p) => p.length >= 2);
-      for (const p of parts) candidateQueries.push(p);
+      clean.split('-').forEach((p) => {
+        const pt = p.trim();
+        if (pt.length >= 2) candidateQueries.add(pt);
+      });
     }
   }
-  if (artist && clean) {
-    candidateQueries.push(`${clean} ${artist}`);
+
+  const variants = getQueryVariants(clean || songTitle);
+  for (const v of variants) {
+    candidateQueries.add(v);
   }
 
-  for (const query of candidateQueries) {
+  if (artist && clean) {
+    const cleanArtist = artist.replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '').trim();
+    if (cleanArtist) {
+      candidateQueries.add(`${clean} ${cleanArtist}`);
+      candidateQueries.add(`${cleanArtist} ${clean}`);
+    }
+  }
+
+  for (const query of Array.from(candidateQueries).slice(0, 6)) {
     try {
-      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(query)}`;
+      const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=8&q=${encodeURIComponent(query)}`;
       const sRes = await fetch(searchUrl, {
         headers: {
           'User-Agent':
@@ -156,26 +173,10 @@ async function resolveAnyPlayableStream(
             directUrl = directUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
             return {
               streamUrl: directUrl,
-              title: matchingResult.song || matchingResult.title || songTitle,
-              isYt: false,
+              title: decodeHtmlEntities(matchingResult.song || matchingResult.title || songTitle),
             };
           }
         }
-      }
-    } catch {}
-  }
-
-  // 2. Fallback to YouTube for full-length audio
-  const ytQuery = `${clean || songTitle} ${artist || ''}`.trim();
-  if (ytQuery.length >= 2) {
-    try {
-      const ytVideos = await searchYouTubeVideos(ytQuery, 1);
-      if (ytVideos.length > 0 && ytVideos[0].id) {
-        return {
-          streamUrl: `youtube:${ytVideos[0].id}`,
-          title: ytVideos[0].title || songTitle,
-          isYt: true,
-        };
       }
     } catch {}
   }
@@ -194,94 +195,32 @@ export async function POST(request: NextRequest) {
 
     const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
 
-    // If this is a YouTube track, check if a verified 320 KBPS studio AAC version exists on JioSaavn
-    if (trackId.startsWith('yt-')) {
-      const vid = trackId.replace(/^yt-/, '');
+    // If this is a YouTube track ID or foreign imported track, resolve to verified 320 KBPS studio AAC on JioSaavn
+    if (trackId.startsWith('yt-') || trackId.startsWith('foreign-')) {
       const rawTitle = title || '';
-      const clean = cleanSongTitle(rawTitle);
-
-      const candidateQueries: string[] = [];
-      if (clean && clean.length >= 2) {
-        candidateQueries.push(clean);
-        if (/^the\s+/i.test(clean)) {
-          candidateQueries.push(clean.replace(/^the\s+/i, '').trim());
-        } else {
-          candidateQueries.push(`The ${clean}`);
-        }
-        if (clean.includes('-')) {
-          const parts = clean.split('-').map((p) => p.trim()).filter((p) => p.length >= 2);
-          for (const p of parts) {
-            candidateQueries.push(p);
-            if (/^the\s+/i.test(p)) {
-              candidateQueries.push(p.replace(/^the\s+/i, '').trim());
-            }
-          }
-        }
-      }
-      if (artist && clean) {
-        const cleanArtist = artist.replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '').trim();
-        if (cleanArtist) {
-          candidateQueries.push(`${clean} ${cleanArtist}`);
-        }
+      const resolved = await resolveAnyPlayableStream(rawTitle, artist);
+      if (resolved?.streamUrl) {
+        return NextResponse.json({
+          streamUrl: resolved.streamUrl,
+          trackId,
+          title: resolved.title || rawTitle || 'Audio Track',
+          recovered: true,
+          asset: {
+            id: `asset-${trackId}`,
+            format: 'mp4',
+            codec: 'AAC',
+            bitDepth: 16,
+            sampleRate: 44100,
+            bitrate: 320,
+            isLossless: true,
+            isHiRes: false,
+          },
+        });
       }
 
-      for (const query of candidateQueries) {
-        try {
-          const searchUrl = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=5&q=${encodeURIComponent(query)}`;
-          const sRes = await fetch(searchUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-          });
-          if (sRes.ok) {
-            const data = await sRes.json();
-            const results = (data.results || []) as any[];
-            const matchingResult = results.find((item) =>
-              isGoodTitleMatch(rawTitle || title || '', item.song || item.title || '')
-            );
-
-            if (matchingResult) {
-              let directUrl = decryptMediaUrl(matchingResult.encrypted_media_url);
-              if (directUrl) {
-                directUrl = directUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
-                return NextResponse.json({
-                  streamUrl: directUrl,
-                  trackId,
-                  title: matchingResult.song || matchingResult.title || rawTitle || 'Audio Track',
-                  recovered: true,
-                  asset: {
-                    id: `asset-${vid}`,
-                    format: 'mp4',
-                    codec: 'AAC',
-                    bitDepth: 16,
-                    sampleRate: 44100,
-                    bitrate: 320,
-                    isLossless: true,
-                    isHiRes: false,
-                  },
-                });
-              }
-            }
-          }
-        } catch {}
-      }
-
-      // If JioSaavn did not have the exact song, play the requested YouTube video directly
       return NextResponse.json({
-        streamUrl: `youtube:${vid}`,
-        trackId,
-        title: rawTitle || 'YouTube Track',
-        recovered: false,
-        asset: {
-          id: `yt-asset-${vid}`,
-          format: 'm4a',
-          codec: 'AAC',
-          bitrate: 160,
-          isLossless: false,
-          isHiRes: false,
-        },
-      });
+        error: 'No playable studio stream found for this track',
+      }, { status: 404 });
     }
 
     // Check if this is a JioSaavn external track
@@ -307,7 +246,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // If JioSaavn ID failed, fallback to universal search (JioSaavn + YouTube)
+      // If JioSaavn ID failed, fallback to universal search across JioSaavn
       const fallback = await resolveAnyPlayableStream(title, artist);
       if (fallback) {
         return NextResponse.json({
@@ -317,10 +256,10 @@ export async function POST(request: NextRequest) {
           recovered: true,
           asset: {
             id: `recovered-asset-${rawId}`,
-            format: fallback.isYt ? 'm4a' : 'mp4',
+            format: 'mp4',
             codec: 'AAC',
-            bitrate: fallback.isYt ? 160 : 320,
-            isLossless: !fallback.isYt,
+            bitrate: 320,
+            isLossless: true,
             isHiRes: false,
           },
         });
@@ -366,25 +305,24 @@ export async function POST(request: NextRequest) {
         }
 
         let streamUrl = `/api/stream/${selectedAsset.id}`;
-        if (selectedAsset.storageType === 'remote_stream') {
+        if (selectedAsset.storageType === 'remote_stream' && !selectedAsset.storageKey.startsWith('youtube:')) {
           streamUrl = selectedAsset.storageKey;
+          return NextResponse.json({
+            streamUrl,
+            trackId: track.id,
+            title: track.title,
+            asset: {
+              id: selectedAsset.id,
+              format: selectedAsset.format,
+              codec: selectedAsset.codec,
+              bitDepth: selectedAsset.bitDepth,
+              sampleRate: selectedAsset.sampleRate,
+              bitrate: selectedAsset.bitrate,
+              isLossless: selectedAsset.isLossless,
+              isHiRes: selectedAsset.isHiRes,
+            },
+          });
         }
-
-        return NextResponse.json({
-          streamUrl,
-          trackId: track.id,
-          title: track.title,
-          asset: {
-            id: selectedAsset.id,
-            format: selectedAsset.format,
-            codec: selectedAsset.codec,
-            bitDepth: selectedAsset.bitDepth,
-            sampleRate: selectedAsset.sampleRate,
-            bitrate: selectedAsset.bitrate,
-            isLossless: selectedAsset.isLossless,
-            isHiRes: selectedAsset.isHiRes,
-          },
-        });
       }
 
       // Check provider mappings
@@ -405,29 +343,8 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Check if externalUrl points to YouTube
-      const externalLink = track.providerLinks.find((p) => p.externalUrl)?.externalUrl;
-      if (externalLink) {
-        const ytMatch = externalLink.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/))([\w-]{11})/);
-        if (ytMatch) {
-          return NextResponse.json({
-            streamUrl: `youtube:${ytMatch[1]}`,
-            trackId: track.id,
-            title: track.title,
-            asset: {
-              id: `yt-link-${ytMatch[1]}`,
-              format: 'm4a',
-              codec: 'AAC',
-              bitrate: 160,
-              isLossless: false,
-              isHiRes: false,
-            },
-          });
-        }
-      }
-
       // Universal Playable Fallback for tracks without direct assets or marked as handoff:
-      // Auto-resolve to 320 KBPS Studio AAC from JioSaavn or full audio from YouTube!
+      // Auto-resolve to 320 KBPS Studio AAC from JioSaavn
       const artistName = track.artists?.[0]?.artist?.name || artist;
       const resolved = await resolveAnyPlayableStream(track.title || title, artistName);
       if (resolved) {
@@ -438,10 +355,10 @@ export async function POST(request: NextRequest) {
           recovered: true,
           asset: {
             id: `resolved-${track.id}`,
-            format: resolved.isYt ? 'm4a' : 'mp4',
+            format: 'mp4',
             codec: 'AAC',
-            bitrate: resolved.isYt ? 160 : 320,
-            isLossless: !resolved.isYt,
+            bitrate: 320,
+            isLossless: true,
             isHiRes: false,
           },
         });
@@ -470,7 +387,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2. Universal Playable Fallback via JioSaavn search or YouTube search
+    // 2. Universal Playable Fallback via JioSaavn search
     const resolved = await resolveAnyPlayableStream(title, artist);
     if (resolved) {
       return NextResponse.json({
@@ -480,10 +397,10 @@ export async function POST(request: NextRequest) {
         recovered: true,
         asset: {
           id: `resolved-${trackId}`,
-          format: resolved.isYt ? 'm4a' : 'mp4',
+          format: 'mp4',
           codec: 'AAC',
-          bitrate: resolved.isYt ? 160 : 320,
-          isLossless: !resolved.isYt,
+          bitrate: 320,
+          isLossless: true,
           isHiRes: false,
         },
       });

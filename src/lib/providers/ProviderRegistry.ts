@@ -12,7 +12,6 @@ class ProviderRegistryClass {
   constructor() {
     this.register(new PrivateLibraryProvider());
     this.register(new IndianMusicProvider());
-    this.register(new YouTubeProvider());
     this.register(new AudiusProvider());
     this.register(new OpenLicensedProvider());
     this.register(new CommercialHandoffProvider());
