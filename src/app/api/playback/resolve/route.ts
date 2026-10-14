@@ -12,6 +12,38 @@ const ResolveSchema = z.object({
   artist: z.string().optional(),
 });
 
+// Strict title verification helper to prevent picking the wrong song (e.g. "Life of Ram" instead of "Life of Prince")
+function isGoodTitleMatch(requestedTitle: string, candidateSong: string): boolean {
+  if (!requestedTitle || !candidateSong) return false;
+  const reqClean = cleanSongTitle(requestedTitle).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const candClean = cleanSongTitle(candidateSong).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+
+  const reqWords = reqClean.split(/\s+/).filter((w) => w.length > 2);
+  const candWords = candClean.split(/\s+/).filter((w) => w.length > 2);
+
+  if (reqWords.length === 0 || candWords.length === 0) return false;
+
+  const genericWords = new Set(['the', 'and', 'from', 'song', 'audio', 'video', 'life', 'full', 'version']);
+  const reqDistinctive = reqWords.filter((w) => !genericWords.has(w));
+
+  // If there are distinctive words (like "prince", "maayunnallo"), at least one MUST be in the candidate!
+  if (reqDistinctive.length > 0) {
+    const hasDistinctiveMatch = reqDistinctive.some((w) => candClean.includes(w) || candWords.includes(w));
+    if (!hasDistinctiveMatch) {
+      return false;
+    }
+  }
+
+  let matchCount = 0;
+  for (const w of reqWords) {
+    if (candWords.includes(w) || candClean.includes(w)) {
+      matchCount++;
+    }
+  }
+
+  return matchCount >= Math.min(2, reqWords.length);
+}
+
 async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
   const SAAVN_BASE = 'https://www.jiosaavn.com/api.php';
   const headers = {
@@ -55,6 +87,9 @@ async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
 
       for (const alt of results) {
         if (alt.id === rawId) continue;
+        const altSong = alt.song || alt.title || '';
+        if (songTitle && !isGoodTitleMatch(songTitle, altSong)) continue;
+
         const altUrl = decryptMediaUrl(alt.encrypted_media_url);
         if (!altUrl) continue;
 
@@ -66,7 +101,7 @@ async function resolveJioSaavnStream(rawId: string, candidateTitle?: string) {
           if (head.status === 200) {
             return {
               streamUrl: altUrl,
-              title: alt.song || alt.title,
+              title: altSong,
               recovered: true,
             };
           }
@@ -86,7 +121,7 @@ async function resolveAnyPlayableStream(
   const songTitle = title || '';
   const clean = cleanSongTitle(songTitle);
 
-  // 1. Try JioSaavn for 320 KBPS Studio AAC
+  // 1. Try JioSaavn for 320 KBPS Studio AAC with strict title verification
   const candidateQueries: string[] = [];
   if (clean && clean.length >= 2) {
     candidateQueries.push(clean);
@@ -111,14 +146,17 @@ async function resolveAnyPlayableStream(
       if (sRes.ok) {
         const data = await sRes.json();
         const results = (data.results || []) as any[];
-        if (results.length > 0) {
-          const top = results[0];
-          let directUrl = decryptMediaUrl(top.encrypted_media_url);
+        const matchingResult = results.find((item) =>
+          isGoodTitleMatch(songTitle, item.song || item.title || '')
+        );
+
+        if (matchingResult) {
+          let directUrl = decryptMediaUrl(matchingResult.encrypted_media_url);
           if (directUrl) {
             directUrl = directUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
             return {
               streamUrl: directUrl,
-              title: top.song || top.title || songTitle,
+              title: matchingResult.song || matchingResult.title || songTitle,
               isYt: false,
             };
           }
@@ -156,7 +194,7 @@ export async function POST(request: NextRequest) {
 
     const { trackId, preferredQuality = 'auto', title, artist } = parsed.data;
 
-    // If this is a YouTube track, quickly check if a studio 320 KBPS AAC version exists on JioSaavn
+    // If this is a YouTube track, check if a verified 320 KBPS studio AAC version exists on JioSaavn
     if (trackId.startsWith('yt-')) {
       const vid = trackId.replace(/^yt-/, '');
       const rawTitle = title || '';
@@ -188,15 +226,18 @@ export async function POST(request: NextRequest) {
           if (sRes.ok) {
             const data = await sRes.json();
             const results = (data.results || []) as any[];
-            if (results.length > 0) {
-              const top = results[0];
-              let directUrl = decryptMediaUrl(top.encrypted_media_url);
+            const matchingResult = results.find((item) =>
+              isGoodTitleMatch(rawTitle || title || '', item.song || item.title || '')
+            );
+
+            if (matchingResult) {
+              let directUrl = decryptMediaUrl(matchingResult.encrypted_media_url);
               if (directUrl) {
                 directUrl = directUrl.replace(/_96\.(mp4|m4a)/i, '_320.$1').replace(/_160\.(mp4|m4a)/i, '_320.$1');
                 return NextResponse.json({
                   streamUrl: directUrl,
                   trackId,
-                  title: top.song || top.title || rawTitle || 'Audio Track',
+                  title: matchingResult.song || matchingResult.title || rawTitle || 'Audio Track',
                   recovered: true,
                   asset: {
                     id: `asset-${vid}`,
@@ -215,6 +256,7 @@ export async function POST(request: NextRequest) {
         } catch {}
       }
 
+      // If JioSaavn did not have the exact song, play the requested YouTube video directly
       return NextResponse.json({
         streamUrl: `youtube:${vid}`,
         trackId,

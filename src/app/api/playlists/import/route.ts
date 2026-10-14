@@ -44,6 +44,36 @@ function cleanTrackTitle(title: string): string {
     .trim();
 }
 
+function isGoodTitleMatch(requestedTitle: string, candidateSong: string): boolean {
+  if (!requestedTitle || !candidateSong) return false;
+  const reqClean = cleanTrackTitle(requestedTitle).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const candClean = cleanTrackTitle(candidateSong).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+
+  const reqWords = reqClean.split(/\s+/).filter((w) => w.length > 2);
+  const candWords = candClean.split(/\s+/).filter((w) => w.length > 2);
+
+  if (reqWords.length === 0 || candWords.length === 0) return false;
+
+  const genericWords = new Set(['the', 'and', 'from', 'song', 'audio', 'video', 'life', 'full', 'version']);
+  const reqDistinctive = reqWords.filter((w) => !genericWords.has(w));
+
+  if (reqDistinctive.length > 0) {
+    const hasDistinctiveMatch = reqDistinctive.some((w) => candClean.includes(w) || candWords.includes(w));
+    if (!hasDistinctiveMatch) {
+      return false;
+    }
+  }
+
+  let matchCount = 0;
+  for (const w of reqWords) {
+    if (candWords.includes(w) || candClean.includes(w)) {
+      matchCount++;
+    }
+  }
+
+  return matchCount >= Math.min(2, reqWords.length);
+}
+
 // 1. Fetch via Official Spotify Web API with Client Credentials (supports 200+ songs pagination)
 async function fetchOfficialSpotifyPlaylist(
   id: string,
@@ -314,11 +344,6 @@ function parseRawTracklist(text: string): ParsedPlaylist {
 // 5. Helper: Smart match track on JioSaavn (320 KBPS AAC) or fallback to full YouTube audio (Zero preview clips!)
 async function matchPlayableStream(title: string, artist: string) {
   const cleanTitle = cleanTrackTitle(title);
-  const titleTokens = cleanTitle
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .split(/\s+/)
-    .filter((w) => w.length > 2);
   const primaryArtist = artist.split(/[,&]/)[0].trim();
 
   // Try JioSaavn with title + artist, then just cleaned title
@@ -343,11 +368,9 @@ async function matchPlayableStream(title: string, artist: string) {
         const results = (data.results || []) as any[];
 
         for (const item of results) {
-          const songName = (item.song || item.title || '').toLowerCase();
-          const hasTitleOverlap =
-            titleTokens.length === 0 || titleTokens.some((t) => songName.includes(t));
+          const matchesTitle = isGoodTitleMatch(cleanTitle, item.song || item.title || '');
 
-          if (hasTitleOverlap && item.encrypted_media_url) {
+          if (matchesTitle && item.encrypted_media_url) {
             let streamUrl = decryptMediaUrl(item.encrypted_media_url);
             if (streamUrl) {
               // Upgrade to highest quality 320 KBPS AAC stream

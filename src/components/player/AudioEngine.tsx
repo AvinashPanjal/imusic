@@ -19,6 +19,7 @@ export const AudioEngine: React.FC = () => {
 
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
+  const activeEngineRef = useRef<'audio' | 'yt' | null>(null);
 
   const {
     currentTrack,
@@ -368,6 +369,7 @@ export const AudioEngine: React.FC = () => {
     // Helper to start YouTube playback
     const startYouTubePlayback = (vid: string) => {
       if (!active) return;
+      activeEngineRef.current = 'yt';
       if (audio) {
         audio.pause();
         audio.removeAttribute('src');
@@ -405,6 +407,7 @@ export const AudioEngine: React.FC = () => {
     // Helper to start standard HTML5 audio playback (320 KBPS AAC)
     const startAudioPlayback = (streamUrl: string) => {
       if (!active || !audio) return;
+      activeEngineRef.current = 'audio';
 
       if (ytProgressIntervalRef.current) clearInterval(ytProgressIntervalRef.current);
       if (isYtReadyRef.current && ytPlayerRef.current?.pauseVideo) {
@@ -487,28 +490,35 @@ export const AudioEngine: React.FC = () => {
 
   // Handle play / pause toggle
   useEffect(() => {
-    const isYt = isYouTubeTrack(currentTrack);
-
-    if (isYt) {
-      if (isYtReadyRef.current && ytPlayerRef.current) {
+    if (!isPlaying) {
+      // Unconditionally pause BOTH engines to guarantee playback stops immediately
+      if (audioRef.current && !audioRef.current.paused) {
         try {
-          if (isPlaying) {
-            ytPlayerRef.current.playVideo();
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-          } else {
-            ytPlayerRef.current.pauseVideo();
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-          }
+          audioRef.current.pause();
         } catch {}
+      }
+      if (ytPlayerRef.current?.pauseVideo) {
+        try {
+          ytPlayerRef.current.pauseVideo();
+        } catch {}
+      }
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
       }
       return;
     }
 
-    const audio = audioRef.current;
-    if (!audio || !audio.src) return;
-
-    if (isPlaying) {
-      if (audio.paused) {
+    // isPlaying is true: resume whichever engine is active
+    if (activeEngineRef.current === 'yt') {
+      if (isYtReadyRef.current && ytPlayerRef.current?.playVideo) {
+        try {
+          ytPlayerRef.current.playVideo();
+          if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        } catch {}
+      }
+    } else {
+      const audio = audioRef.current;
+      if (audio && audio.src && audio.paused) {
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
@@ -517,25 +527,16 @@ export const AudioEngine: React.FC = () => {
             }
           });
         }
-      }
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'playing';
-      }
-    } else {
-      if (!audio.paused) {
-        audio.pause();
-      }
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
       }
     }
-  }, [isPlaying, setIsPlaying, currentTrack, isYouTubeTrack]);
+  }, [isPlaying, setIsPlaying]);
 
   // Handle seek synchronization
   useEffect(() => {
-    const isYt = isYouTubeTrack(currentTrack);
-
-    if (isYt) {
+    if (activeEngineRef.current === 'yt') {
       if (isYtReadyRef.current && ytPlayerRef.current?.seekTo) {
         try {
           const cur = ytPlayerRef.current.getCurrentTime() || 0;
@@ -554,13 +555,11 @@ export const AudioEngine: React.FC = () => {
       audio.currentTime = currentTime;
       updateMediaSessionPosition();
     }
-  }, [currentTime, currentTrack, isYouTubeTrack, updateMediaSessionPosition]);
+  }, [currentTime, updateMediaSessionPosition]);
 
   // Handle volume / mute
   useEffect(() => {
-    const isYt = isYouTubeTrack(currentTrack);
-
-    if (isYt) {
+    if (activeEngineRef.current === 'yt') {
       if (isYtReadyRef.current && ytPlayerRef.current?.setVolume) {
         try {
           const targetVol = isMuted ? 0 : Math.round(volume * 100);
@@ -576,7 +575,7 @@ export const AudioEngine: React.FC = () => {
       audio.volume = isMuted ? 0 : volume;
       audio.muted = isMuted;
     } catch {}
-  }, [volume, isMuted, currentTrack, isYouTubeTrack]);
+  }, [volume, isMuted]);
 
   // Setup standard audio event listeners
   useEffect(() => {
@@ -635,8 +634,7 @@ export const AudioEngine: React.FC = () => {
 
     const handleError = async () => {
       // CRITICAL: Ignore HTML5 audio error events if currently playing a YouTube track!
-      const activeTrack = usePlayerStore.getState().currentTrack;
-      if (isYouTubeTrack(activeTrack)) {
+      if (activeEngineRef.current === 'yt') {
         return;
       }
 
@@ -690,13 +688,12 @@ export const AudioEngine: React.FC = () => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const state = usePlayerStore.getState();
-        const isYt = isYouTubeTrack(state.currentTrack);
         if (state.isPlaying) {
-          if (isYt && ytPlayerRef.current?.playVideo) {
+          if (activeEngineRef.current === 'yt' && ytPlayerRef.current?.playVideo) {
             try {
               ytPlayerRef.current.playVideo();
             } catch {}
-          } else if (audioRef.current && audioRef.current.paused) {
+          } else if (audioRef.current && audioRef.current.paused && audioRef.current.src) {
             audioRef.current.play().catch(() => {});
           }
         }
@@ -706,13 +703,12 @@ export const AudioEngine: React.FC = () => {
     const handlePopState = () => {
       // Keep playing uninterrupted when user navigates back / forward in browser history
       const state = usePlayerStore.getState();
-      const isYt = isYouTubeTrack(state.currentTrack);
       if (state.isPlaying) {
-        if (isYt && ytPlayerRef.current?.playVideo) {
+        if (activeEngineRef.current === 'yt' && ytPlayerRef.current?.playVideo) {
           try {
             ytPlayerRef.current.playVideo();
           } catch {}
-        } else if (audioRef.current && audioRef.current.paused) {
+        } else if (audioRef.current && audioRef.current.paused && audioRef.current.src) {
           audioRef.current.play().catch(() => {});
         }
       }
