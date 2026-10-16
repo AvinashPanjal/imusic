@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell';
 
 const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://imusic-stream-service.onrender.com');
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://imusic-two.vercel.app');
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -96,7 +96,7 @@ export const metadata: Metadata = {
     },
   },
   verification: {
-    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || '',
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || '8Ree6Iz36zQVrxXwJhwtVWdf_vdBPfXYSm0lkS6Ac0s',
   },
   alternates: {
     canonical: siteUrl,
@@ -171,6 +171,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="google-site-verification" content="8Ree6Iz36zQVrxXwJhwtVWdf_vdBPfXYSm0lkS6Ac0s" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
