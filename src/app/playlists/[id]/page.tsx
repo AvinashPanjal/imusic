@@ -6,7 +6,8 @@ import { PlaylistData, TrackData } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { usePlayerStore } from '@/store/playerStore';
 import { LocalLibrary } from '@/lib/storage/localLibrary';
-import { Play, Shuffle, ChevronLeft, Library, Trash2 } from 'lucide-react';
+import { fetchYouTubeTrackInfo } from '@/lib/youtubeTrack';
+import { Play, Shuffle, ChevronLeft, Library, Trash2, Plus, Search, X, Check } from 'lucide-react';
 import styles from './playlistDetail.module.css';
 
 export default function PlaylistDetailPage() {
@@ -17,6 +18,11 @@ export default function PlaylistDetailPage() {
   const [playlist, setPlaylist] = useState<PlaylistData | null>(null);
   const [tracks, setTracks] = useState<TrackData[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Quick YouTube add state
+  const [ytUrl, setYtUrl] = useState('');
+  const [isAddingYt, setIsAddingYt] = useState(false);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
 
   const { playTrack, toggleShuffle } = usePlayerStore();
 
@@ -62,6 +68,54 @@ export default function PlaylistDetailPage() {
       toggleShuffle();
       const randomIndex = Math.floor(Math.random() * tracks.length);
       playTrack(tracks[randomIndex], tracks, randomIndex);
+    }
+  };
+
+  const handleRemoveTrack = (track: TrackData) => {
+    LocalLibrary.removeTrackFromPlaylist(id, track.id);
+    setTracks((prev) => prev.filter((t) => t.id !== track.id));
+    setPlaylist((prev) => (prev ? { ...prev, trackCount: Math.max(0, (prev.trackCount || 1) - 1) } : prev));
+    fetch(`/api/playlists/${id}/tracks/${track.id}`, { method: 'DELETE' }).catch(() => {});
+    setAddNotice(`Removed "${track.title}" from playlist`);
+    setTimeout(() => setAddNotice(null), 2500);
+  };
+
+  const handleAddYtTrack = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ytUrl.trim() || isAddingYt) return;
+
+    setIsAddingYt(true);
+    try {
+      const track = await fetchYouTubeTrackInfo(ytUrl.trim());
+      if (!track) {
+        setAddNotice('Could not extract YouTube video. Check URL.');
+        setTimeout(() => setAddNotice(null), 3000);
+        return;
+      }
+
+      LocalLibrary.addTrackToPlaylist(id, track);
+      setTracks((prev) => [...prev.filter((t) => t.id !== track.id), track]);
+      setPlaylist((prev) => (prev ? {
+        ...prev,
+        trackCount: (prev.trackCount || tracks.length) + 1,
+        coverImage: prev.coverImage || track.album?.coverImage,
+      } : prev));
+
+      fetch(`/api/playlists/${id}/tracks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: track.id }),
+      }).catch(() => {});
+
+      setAddNotice(`Added "${track.title}" to playlist!`);
+      setYtUrl('');
+      setTimeout(() => setAddNotice(null), 3000);
+    } catch (err) {
+      console.warn('Error adding YouTube track to playlist:', err);
+      setAddNotice('Failed to add track.');
+      setTimeout(() => setAddNotice(null), 3000);
+    } finally {
+      setIsAddingYt(false);
     }
   };
 
@@ -143,12 +197,50 @@ export default function PlaylistDetailPage() {
         </div>
       )}
 
+      {/* Quick Add Song via YouTube */}
+      <div className={styles.quickAddSection}>
+        <form onSubmit={handleAddYtTrack} className={styles.quickAddForm}>
+          <div className={styles.quickAddInputWrapper}>
+            <Search size={15} className={styles.quickAddIcon} />
+            <input
+              type="text"
+              placeholder="Paste YouTube link to add track to this playlist..."
+              value={ytUrl}
+              onChange={(e) => setYtUrl(e.target.value)}
+              className={styles.quickAddInput}
+            />
+            {ytUrl && (
+              <button
+                type="button"
+                className={styles.quickAddClearBtn}
+                onClick={() => setYtUrl('')}
+                title="Clear"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            type="submit"
+            className={styles.quickAddBtn}
+            disabled={!ytUrl.trim() || isAddingYt}
+          >
+            <Plus size={16} /> {isAddingYt ? 'Adding...' : 'Add Track'}
+          </button>
+        </form>
+        {addNotice && (
+          <div className={styles.addNotice}>
+            <Check size={14} /> {addNotice}
+          </div>
+        )}
+      </div>
+
       {/* Tracks List */}
       <section className={styles.trackSection}>
         {tracks.length === 0 ? (
           <div className={styles.emptyTracks}>
             <p>No tracks in this playlist yet.</p>
-            <p className={styles.hint}>Browse your library or search for songs to add them.</p>
+            <p className={styles.hint}>Paste a YouTube link above or click &ldquo;Add to Playlist&rdquo; on any track in your library.</p>
           </div>
         ) : (
           <div className={styles.trackList}>
@@ -159,6 +251,8 @@ export default function PlaylistDetailPage() {
                 index={idx}
                 playlistContext={tracks}
                 showArtwork={true}
+                onRemove={handleRemoveTrack}
+                removeLabel="Remove from Playlist"
               />
             ))}
           </div>

@@ -4,9 +4,10 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { TrackData } from '@/types/music';
 import { usePlayerStore } from '@/store/playerStore';
-import { Play, Pause, MoreVertical, Plus, Heart, Download, Check, Sparkles } from 'lucide-react';
+import { Play, Pause, MoreVertical, Plus, Heart, Download, Check, Sparkles, ListPlus, Trash2 } from 'lucide-react';
 import { formatTime } from '@/lib/lyrics';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
+import { AddToPlaylistModal } from './AddToPlaylistModal';
 import styles from './TrackListItem.module.css';
 
 interface TrackListItemProps {
@@ -14,6 +15,8 @@ interface TrackListItemProps {
   index?: number;
   playlistContext?: TrackData[];
   showArtwork?: boolean;
+  onRemove?: (track: TrackData) => void;
+  removeLabel?: string;
 }
 
 export const TrackListItem: React.FC<TrackListItemProps> = ({
@@ -21,9 +24,12 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
   index,
   playlistContext,
   showArtwork = true,
+  onRemove,
+  removeLabel,
 }) => {
   const { currentTrack, isPlaying, playTrack, togglePlay, addToQueue, playNext } = usePlayerStore();
   const [showMenu, setShowMenu] = useState(false);
+  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [isDownloaded, setIsDownloaded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -120,9 +126,25 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
         </div>
       </div>
 
-      {/* Duration and Menu Button */}
+      {/* Duration, Quick Remove, and Menu Button */}
       <div className={styles.rightActions} onClick={(e) => e.stopPropagation()}>
         <span className={styles.duration}>{formatTime(track.duration)}</span>
+        
+        {onRemove && (
+          <button
+            type="button"
+            className={styles.removeBtn}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(track);
+            }}
+            title={removeLabel || 'Remove'}
+            aria-label={removeLabel || 'Remove'}
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+
         <div className={styles.menuAnchor}>
           <button
             type="button"
@@ -135,6 +157,16 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
 
           {showMenu && (
             <div className={styles.menuPopover}>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setShowPlaylistModal(true);
+                  setShowMenu(false);
+                }}
+              >
+                <ListPlus size={16} /> Add to Playlist
+              </button>
               <button
                 type="button"
                 className={styles.menuItem}
@@ -171,10 +203,29 @@ export const TrackListItem: React.FC<TrackListItemProps> = ({
                   )}
                 </button>
               )}
+              {onRemove && (
+                <button
+                  type="button"
+                  className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    onRemove(track);
+                  }}
+                >
+                  <Trash2 size={16} /> {removeLabel || 'Remove'}
+                </button>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      <AddToPlaylistModal
+        track={track}
+        isOpen={showPlaylistModal}
+        onClose={() => setShowPlaylistModal(false)}
+      />
     </div>
   );
 };

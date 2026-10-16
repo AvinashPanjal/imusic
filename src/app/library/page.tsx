@@ -9,6 +9,8 @@ import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
 import { LocalLibrary } from '@/lib/storage/localLibrary';
+import { usePlayerStore } from '@/store/playerStore';
+import { fetchYouTubeTrackInfo } from '@/lib/youtubeTrack';
 import {
   Library as LibraryIcon,
   Heart,
@@ -27,6 +29,10 @@ import {
   Sparkles,
   Upload,
   FileText,
+  Play,
+  Search,
+  X,
+  Check,
 } from 'lucide-react';
 import styles from './library.module.css';
 
@@ -35,6 +41,7 @@ type SortField = 'date' | 'title' | 'artist';
 
 export default function LibraryPage() {
   const router = useRouter();
+  const { playTrack } = usePlayerStore();
   const [activeTab, setActiveTab] = useState<LibraryTab>('playlists');
   const [sortField, setSortField] = useState<SortField>('date');
 
@@ -48,6 +55,11 @@ export default function LibraryPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
   const [playlistToDelete, setPlaylistToDelete] = useState<{ id: string; title: string } | null>(null);
+
+  // Quick YouTube Paste State for Favorites
+  const [ytInputUrl, setYtInputUrl] = useState('');
+  const [isResolvingYt, setIsResolvingYt] = useState(false);
+  const [ytNotice, setYtNotice] = useState<string | null>(null);
 
   // Import Playlist Modal State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -190,6 +202,74 @@ export default function LibraryPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     }).catch(() => {});
+
+    // Immediately open the newly created playlist
+    router.push(`/playlists/${localPl.id}`);
+  };
+
+  const handleRemoveFavorite = (track: TrackData) => {
+    LocalLibrary.removeFavorite(track.id);
+    setFavorites((prev) => prev.filter((t) => t.id !== track.id));
+    fetch(`/api/library/favorites/${track.id}`, { method: 'DELETE' }).catch(() => {});
+    setYtNotice(`Removed "${track.title}" from Favorites`);
+    setTimeout(() => setYtNotice(null), 2500);
+  };
+
+  const handleYtPlayNow = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!ytInputUrl.trim() || isResolvingYt) return;
+
+    setIsResolvingYt(true);
+    try {
+      const track = await fetchYouTubeTrackInfo(ytInputUrl.trim());
+      if (!track) {
+        setYtNotice('Could not extract YouTube video. Please check the URL.');
+        setTimeout(() => setYtNotice(null), 3500);
+        return;
+      }
+
+      playTrack(track, [track], 0);
+      setYtNotice(`Playing "${track.title}"!`);
+      setTimeout(() => setYtNotice(null), 3000);
+    } catch (err) {
+      console.warn('Error playing YouTube track:', err);
+      setYtNotice('Failed to play YouTube track.');
+      setTimeout(() => setYtNotice(null), 3000);
+    } finally {
+      setIsResolvingYt(false);
+    }
+  };
+
+  const handleYtAddFavorite = async () => {
+    if (!ytInputUrl.trim() || isResolvingYt) return;
+
+    setIsResolvingYt(true);
+    try {
+      const track = await fetchYouTubeTrackInfo(ytInputUrl.trim());
+      if (!track) {
+        setYtNotice('Could not extract YouTube video. Please check the URL.');
+        setTimeout(() => setYtNotice(null), 3500);
+        return;
+      }
+
+      LocalLibrary.addFavorite(track);
+      setFavorites((prev) => [track, ...prev.filter((t) => t.id !== track.id)]);
+      fetch('/api/library/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: track.id }),
+      }).catch(() => {});
+
+      setYtNotice(`Added "${track.title}" to Favorites!`);
+      setYtInputUrl('');
+      setTimeout(() => setYtNotice(null), 3500);
+    } catch (err) {
+      console.warn('Error favoriting YouTube track:', err);
+      setYtNotice('Failed to add track to favorites.');
+      setTimeout(() => setYtNotice(null), 3000);
+    } finally {
+      setIsResolvingYt(false);
+    }
   };
 
   const handleImportPlaylist = async (e: React.FormEvent) => {
@@ -451,11 +531,80 @@ export default function LibraryPage() {
       {/* Tab: Favorites */}
       {activeTab === 'favorites' && (
         <div className={styles.tabContent}>
+          {/* Quick YouTube Stream & Favorite Box */}
+          <div className={styles.ytQuickSection}>
+            <div className={styles.ytQuickHeader}>
+              <div className={styles.ytHeaderTitle}>
+                <Sparkles size={16} className={styles.sparkleIcon} />
+                <span>Quick YouTube Stream &amp; Favorites</span>
+              </div>
+              <span className={styles.ytHeaderSubtitle}>
+                Paste any YouTube video, song, or short link to play audio directly or save to your Favorites.
+              </span>
+            </div>
+
+            <form onSubmit={handleYtPlayNow} className={styles.ytInputRow}>
+              <div className={styles.ytInputWrapper}>
+                <Search size={16} className={styles.ytInputIcon} />
+                <input
+                  type="text"
+                  placeholder="Paste YouTube link (e.g. https://youtu.be/... or https://youtube.com/watch?v=...)"
+                  value={ytInputUrl}
+                  onChange={(e) => setYtInputUrl(e.target.value)}
+                  className={styles.ytInput}
+                />
+                {ytInputUrl && (
+                  <button
+                    type="button"
+                    className={styles.ytClearBtn}
+                    onClick={() => setYtInputUrl('')}
+                    title="Clear"
+                    aria-label="Clear input"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              <div className={styles.ytBtnGroup}>
+                <button
+                  type="button"
+                  className={styles.ytPlayBtn}
+                  disabled={!ytInputUrl.trim() || isResolvingYt}
+                  onClick={handleYtPlayNow}
+                >
+                  <Play size={15} fill="currentColor" /> Play Now
+                </button>
+
+                <button
+                  type="button"
+                  className={styles.ytFavBtn}
+                  disabled={!ytInputUrl.trim() || isResolvingYt}
+                  onClick={handleYtAddFavorite}
+                >
+                  <Heart size={15} fill="currentColor" /> + Favorite
+                </button>
+              </div>
+            </form>
+
+            {isResolvingYt && (
+              <div className={styles.ytStatusNotice}>
+                <div className={styles.spinnerSm} /> Loading YouTube audio track...
+              </div>
+            )}
+
+            {ytNotice && (
+              <div className={styles.ytSuccessNotice}>
+                <Check size={16} /> {ytNotice}
+              </div>
+            )}
+          </div>
+
           {favorites.length === 0 ? (
             <div className={styles.emptyView}>
               <Heart size={44} className={styles.emptyIcon} />
               <h3>No Favorites Yet</h3>
-              <p>Tap the heart icon in the Now Playing screen to bookmark tracks.</p>
+              <p>Paste a YouTube link above or tap the heart icon while playing any song.</p>
             </div>
           ) : (
             <div className={styles.trackList}>
@@ -465,6 +614,8 @@ export default function LibraryPage() {
                   track={track}
                   index={idx}
                   playlistContext={favorites}
+                  onRemove={handleRemoveFavorite}
+                  removeLabel="Remove from Favorites"
                 />
               ))}
             </div>

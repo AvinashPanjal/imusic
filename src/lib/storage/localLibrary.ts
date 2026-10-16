@@ -52,6 +52,48 @@ export const LocalLibrary = {
     }
   },
 
+  addTrackToPlaylist(playlistId: string, track: TrackData): boolean {
+    if (!isBrowser()) return false;
+    try {
+      const list = this.getPlaylists();
+      const pl = list.find((p) => p.id === playlistId);
+      if (!pl) return false;
+      if (!Array.isArray(pl.tracks)) pl.tracks = [];
+      const alreadyExists = pl.tracks.some((t: any) => (t.track ? t.track.id === track.id : t.id === track.id));
+      if (!alreadyExists) {
+        pl.tracks.push({
+          position: pl.tracks.length,
+          track,
+        });
+        pl.trackCount = pl.tracks.length;
+        if (!pl.coverImage && track.album?.coverImage && !track.album.coverImage.includes('default-artwork')) {
+          pl.coverImage = track.album.coverImage;
+        }
+        localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(list));
+      }
+      return true;
+    } catch (e) {
+      console.warn('Failed to add track to playlist:', e);
+      return false;
+    }
+  },
+
+  removeTrackFromPlaylist(playlistId: string, trackId: string): boolean {
+    if (!isBrowser()) return false;
+    try {
+      const list = this.getPlaylists();
+      const pl = list.find((p) => p.id === playlistId);
+      if (!pl || !Array.isArray(pl.tracks)) return false;
+      pl.tracks = pl.tracks.filter((t: any) => (t.track ? t.track.id !== trackId : t.id !== trackId));
+      pl.trackCount = pl.tracks.length;
+      localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(list));
+      return true;
+    } catch (e) {
+      console.warn('Failed to remove track from playlist:', e);
+      return false;
+    }
+  },
+
   // --- FAVORITES ---
   getFavorites(): TrackData[] {
     if (!isBrowser()) return [];
@@ -68,6 +110,30 @@ export const LocalLibrary = {
   isFavorite(trackId: string): boolean {
     const favs = this.getFavorites();
     return favs.some((t) => t.id === trackId);
+  },
+
+  addFavorite(track: TrackData): void {
+    if (!isBrowser()) return;
+    try {
+      const favs = this.getFavorites();
+      const idx = favs.findIndex((t) => t.id === track.id);
+      if (idx === -1) {
+        favs.unshift({ ...track, isFavorite: true });
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+      }
+    } catch (e) {
+      console.warn('Failed to add favorite:', e);
+    }
+  },
+
+  removeFavorite(trackId: string): void {
+    if (!isBrowser()) return;
+    try {
+      const favs = this.getFavorites().filter((t) => t.id !== trackId);
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+    } catch (e) {
+      console.warn('Failed to remove favorite:', e);
+    }
   },
 
   toggleFavorite(track: TrackData): boolean {
