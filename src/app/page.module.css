@@ -223,3 +223,47 @@
 .primaryBtn:hover {
   background: var(--accent-hover);
 }
+
+/* SEO Footer */
+.seoFooter {
+  margin-top: 32px;
+  padding: 24px 20px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.seoFooterTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.seoFooterDesc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.seoFooterLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.seoFooterLink {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-hover);
+  text-decoration: none;
+}
+
+.seoFooterLink:hover {
+  text-decoration: underline;
+}
