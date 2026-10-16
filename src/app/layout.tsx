@@ -3,8 +3,7 @@ import '@/styles/globals.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://imusic-two.vercel.app');
+  process.env.NEXT_PUBLIC_SITE_URL || 'https://imusic-two.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
