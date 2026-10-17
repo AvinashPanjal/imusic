@@ -8,7 +8,7 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'iMusic — Free Hi-Res & Lossless Music Streaming PWA',
+    default: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
     template: '%s | iMusic',
   },
   description:
@@ -63,7 +63,7 @@ export const metadata: Metadata = {
     locale: 'en_US',
     url: siteUrl,
     siteName: 'iMusic',
-    title: 'iMusic — Free Hi-Res & Lossless Music Streaming PWA',
+    title: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
     description:
       'Stream ad-free lossless & Hi-Res personal music with zero ads. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.',
     images: [
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'iMusic — Free Hi-Res & Lossless Music Streaming PWA',
+    title: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
     description:
       'Stream ad-free lossless & Hi-Res personal music with zero ads. Import Spotify playlists and play YouTube audio directly.',
     images: ['/icons/icon-512x512.png'],
@@ -177,6 +177,12 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <div className="sr-only">
+          <h1>iMusic | Free Hi-Res &amp; Lossless Music Streaming PWA</h1>
+          <p>
+            Stream ad-free lossless and Hi-Res music online. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.
+          </p>
+        </div>
         <AppShell>{children}</AppShell>
       </body>
     </html>
