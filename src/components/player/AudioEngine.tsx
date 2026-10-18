@@ -586,6 +586,7 @@ export const AudioEngine: React.FC = () => {
     const startAudioPlayback = (streamUrl: string) => {
       if (!active || !audio) return;
 
+      isManualPauseRef.current = false;
       isYtModeRef.current = false;
       audio.loop = false;
       const targetVol = isMuted ? 0 : Math.max(0, Math.min(1, volume));
@@ -805,15 +806,11 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handlePause = () => {
-      isManualPauseRef.current = true;
-      pause();
-      if (isYtModeRef.current && ytPlayerRef.current) {
-        try {
-          ytPlayerRef.current.pauseVideo?.();
-        } catch {}
-      }
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
+      if (isYtModeRef.current) return;
+      if (!usePlayerStore.getState().isPlaying) {
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'paused';
+        }
       }
     };
 
