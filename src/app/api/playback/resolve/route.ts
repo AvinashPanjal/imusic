@@ -238,7 +238,30 @@ export async function POST(request: NextRequest) {
       const vid = trackId.replace(/^(yt-|foreign-)/, '');
       const rawTitle = title || '';
 
-      // Direct native YouTube audio stream - never substitute with different songs!
+      // Prefer verified direct studio 320kbps AAC stream (works in the background on iPhone PWA & Android lockscreen)
+      if (rawTitle && rawTitle !== 'YouTube Audio Track') {
+        try {
+          const studioStream = await resolveAnyPlayableStream(rawTitle, artist, album);
+          if (studioStream?.streamUrl && !studioStream.streamUrl.includes('/api/stream/yt')) {
+            return NextResponse.json({
+              streamUrl: studioStream.streamUrl,
+              trackId,
+              title: studioStream.title || rawTitle,
+              recovered: true,
+              asset: {
+                id: `studio-direct-${vid}`,
+                format: 'm4a',
+                codec: 'AAC',
+                bitrate: 320,
+                isLossless: false,
+                isHiRes: true,
+              },
+            });
+          }
+        } catch {}
+      }
+
+      // Direct native YouTube audio stream fallback
       return NextResponse.json({
         streamUrl: `/api/stream/yt?v=${vid}`,
         youtubeId: vid,

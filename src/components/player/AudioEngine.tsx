@@ -60,9 +60,12 @@ export const AudioEngine: React.FC = () => {
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
   const isManualPauseRef = useRef<boolean>(false);
+  const preResolvedUrlsRef = useRef<Map<string, string>>(new Map());
 
   const {
     currentTrack,
+    queue,
+    queueIndex,
     isPlaying,
     currentTime,
     volume,
@@ -79,20 +82,13 @@ export const AudioEngine: React.FC = () => {
     updatePlaybackProgress,
   } = usePlayerStore();
 
-  // Keep Web Audio hardware context active in the background
+  // Maintain Web Audio hardware context safely without rogue oscillators that suspend iOS sessions
   const ensureAudioContext = useCallback(() => {
     try {
       if (!audioContextRef.current && typeof window !== 'undefined') {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
-          const ctx = new AudioCtx();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          gain.gain.value = 0.0001; // Inaudible
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          audioContextRef.current = ctx;
+          audioContextRef.current = new AudioCtx();
         }
       }
       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -608,13 +604,34 @@ export const AudioEngine: React.FC = () => {
       }
     };
 
-    // FAST PATH: Direct standard audio URL (JioSaavn CDN) or local YouTube stream on localhost
+    // FAST PATH 0: Instant handover from memory cache (pre-resolved upcoming tracks)
+    const cachedPreResolved = preResolvedUrlsRef.current.get(currentTrack.id);
+    if (cachedPreResolved) {
+      startAudioPlayback(cachedPreResolved);
+      const curIdx = queue.findIndex((t) => t.id === currentTrack.id);
+      const nextItem = curIdx >= 0 && curIdx + 1 < queue.length ? queue[curIdx + 1] : null;
+      if (nextItem && !nextItem.streamUrl && !preResolvedUrlsRef.current.has(nextItem.id)) {
+        resolveTrackUrl(nextItem).then((preUrl) => {
+          if (preUrl) preResolvedUrlsRef.current.set(nextItem.id, preUrl);
+        });
+      }
+      return;
+    }
+
+    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN) or local stream
     if (currentTrack.streamUrl) {
       if (currentTrack.streamUrl.startsWith('youtube:')) {
         startAudioPlayback(`/api/stream/yt?v=${currentTrack.streamUrl.replace('youtube:', '')}`);
-        return;
+      } else {
+        startAudioPlayback(currentTrack.streamUrl);
       }
-      startAudioPlayback(currentTrack.streamUrl);
+      const curIdx = queue.findIndex((t) => t.id === currentTrack.id);
+      const nextItem = curIdx >= 0 && curIdx + 1 < queue.length ? queue[curIdx + 1] : null;
+      if (nextItem && !nextItem.streamUrl && !preResolvedUrlsRef.current.has(nextItem.id)) {
+        resolveTrackUrl(nextItem).then((preUrl) => {
+          if (preUrl) preResolvedUrlsRef.current.set(nextItem.id, preUrl);
+        });
+      }
       return;
     }
 
@@ -644,6 +661,13 @@ export const AudioEngine: React.FC = () => {
       }
 
       startAudioPlayback(resolvedUrl);
+      const curIdx = queue.findIndex((t) => t.id === currentTrack.id);
+      const nextItem = curIdx >= 0 && curIdx + 1 < queue.length ? queue[curIdx + 1] : null;
+      if (nextItem && !nextItem.streamUrl && !preResolvedUrlsRef.current.has(nextItem.id)) {
+        resolveTrackUrl(nextItem).then((preUrl) => {
+          if (preUrl) preResolvedUrlsRef.current.set(nextItem.id, preUrl);
+        });
+      }
     });
 
     return () => {
@@ -651,6 +675,7 @@ export const AudioEngine: React.FC = () => {
     };
   }, [
     currentTrack,
+    queue,
     isPlaying,
     resolveTrackUrl,
     updateMediaSession,
@@ -954,12 +979,13 @@ export const AudioEngine: React.FC = () => {
         preload="auto"
         style={{
           position: 'fixed',
-          top: '-9999px',
-          left: '-9999px',
-          width: '1px',
+          bottom: 0,
+          left: 0,
+          width: '100%',
           height: '1px',
-          opacity: 0.001,
+          opacity: 0.01,
           pointerEvents: 'none',
+          zIndex: -1,
         }}
         aria-hidden="true"
       />
