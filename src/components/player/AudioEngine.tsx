@@ -448,15 +448,12 @@ export const AudioEngine: React.FC = () => {
     async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
       if (!track) return null;
 
-      // 1. YouTube direct stream URL or YouTube ID
+      // 1. YouTube direct stream URL
       if (track.streamUrl && track.streamUrl.startsWith('/api/stream/yt')) {
         return track.streamUrl;
       }
       if (track.streamUrl && track.streamUrl.startsWith('youtube:')) {
         return `/api/stream/yt?v=${track.streamUrl.replace('youtube:', '')}`;
-      }
-      if (track.id && track.id.startsWith('yt-')) {
-        return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
       }
 
       // 2. Direct standard audio URL (JioSaavn CDN, Audius, CC, etc.)
@@ -507,6 +504,12 @@ export const AudioEngine: React.FC = () => {
       } catch (err) {
         console.error('Error resolving stream URL:', err);
       }
+
+      // Fallback for YouTube-only track if studio resolver was unavailable
+      if (track.id && track.id.startsWith('yt-')) {
+        return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
+      }
+
       return null;
     },
     []
@@ -648,10 +651,10 @@ export const AudioEngine: React.FC = () => {
         return;
       }
 
-      // If the resolved stream is YouTube-only (not on studio CDN), play via client engine
+      // If direct audio stream previously failed for this track, fallback to client YouTube player
       const resYtId = extractYouTubeId({ streamUrl: resolvedUrl }) || ytId;
-      if (resYtId && (resolvedUrl.includes('/api/stream/yt') || directStreamFailedRef.current)) {
-        console.log(`Playing YouTube stream (${resYtId}) via client player engine.`);
+      if (resYtId && directStreamFailedRef.current) {
+        console.log(`Direct stream previously failed for (${resYtId}). Playing via client player engine fallback.`);
         playViaYouTubePlayer(resYtId);
         return;
       }

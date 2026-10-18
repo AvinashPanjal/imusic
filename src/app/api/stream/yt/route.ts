@@ -166,8 +166,11 @@ async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | nu
   }
 
   const resolvePromise = (async () => {
-    // Attempt 0: Dedicated stream microservice (on Render / Koyeb) - 100% bypasses datacenter blocks
-    const streamServer = process.env.STREAM_SERVER_URL || process.env.EXTERNAL_STREAM_URL;
+    // Attempt 0: Dedicated stream microservice (on Cloudflare Worker) - 100% bypasses datacenter blocks
+    const streamServer =
+      process.env.STREAM_SERVER_URL ||
+      process.env.EXTERNAL_STREAM_URL ||
+      'https://avmusic-streamer.efootballpes2012.workers.dev';
     if (streamServer) {
       try {
         const cleanServer = streamServer.replace(/\/$/, '');
@@ -263,7 +266,10 @@ export async function GET(request: NextRequest) {
     }
 
     // 0. If a dedicated stream server is configured, forward Range request directly for 100% cloud audio streaming
-    const streamServer = process.env.STREAM_SERVER_URL || process.env.EXTERNAL_STREAM_URL;
+    const streamServer =
+      process.env.STREAM_SERVER_URL ||
+      process.env.EXTERNAL_STREAM_URL ||
+      'https://avmusic-streamer.efootballpes2012.workers.dev';
     if (streamServer) {
       try {
         const cleanServer = streamServer.replace(/\/$/, '');
