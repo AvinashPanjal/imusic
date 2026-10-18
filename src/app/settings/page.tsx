@@ -285,7 +285,7 @@ export default function SettingsPage() {
               <strong>3. Add to Home Screen:</strong> Scroll down and select <em>&ldquo;Add to Home Screen&rdquo;</em> (<PlusSquare size={14} className={styles.inlineIcon} />).
             </li>
             <li>
-              <strong>4. Launch Standalone:</strong> Open the newly created <strong>iMusic</strong> app icon from your Home Screen. It will run in standalone fullscreen mode without the Safari URL bar.
+              <strong>4. Launch Standalone:</strong> Open the newly created <strong>AVMusic</strong> app icon from your Home Screen. It will run in standalone fullscreen mode without the Safari URL bar.
             </li>
           </ol>
         </div>

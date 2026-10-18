@@ -24,7 +24,7 @@ export const DesktopSidebar: React.FC = () => {
           <Radio size={20} />
         </div>
         <div className={styles.brandText}>
-          <span className={styles.brandName}>iMusic</span>
+          <span className={styles.brandName}>AVMusic</span>
           <span className={styles.brandBadge}>
             <Sparkles size={10} /> Hi-Res Lossless
           </span>

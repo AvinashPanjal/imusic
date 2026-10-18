@@ -8,16 +8,20 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
-    template: '%s | iMusic',
+    default: 'AVMusic | Free Hi-Res & Lossless Music Streaming PWA',
+    template: '%s | AVMusic',
   },
   description:
-    'Stream ad-free lossless & Hi-Res personal music with zero ads. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.',
-  applicationName: 'iMusic',
-  authors: [{ name: 'iMusic Team' }],
+    'Stream ad-free lossless & Hi-Res personal music with zero ads on AVMusic. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.',
+  applicationName: 'AVMusic',
+  authors: [{ name: 'AVMusic Team' }],
   generator: 'Next.js',
   keywords: [
-    'iMusic',
+    'AVMusic',
+    'avmusic',
+    'AV Music',
+    'avmusic player',
+    'avmusic streaming',
     'music streaming',
     'hi-res audio',
     'lossless music',
@@ -34,14 +38,14 @@ export const metadata: Metadata = {
     'listen music online',
     'spotify import',
   ],
-  creator: 'iMusic',
-  publisher: 'iMusic',
+  creator: 'AVMusic',
+  publisher: 'AVMusic',
   category: 'music',
   classification: 'Music Streaming Web Application',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'iMusic',
+    title: 'AVMusic',
   },
   formatDetection: {
     telephone: false,
@@ -62,24 +66,24 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'en_US',
     url: siteUrl,
-    siteName: 'iMusic',
-    title: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
+    siteName: 'AVMusic',
+    title: 'AVMusic | Free Hi-Res & Lossless Music Streaming PWA',
     description:
-      'Stream ad-free lossless & Hi-Res personal music with zero ads. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.',
+      'Stream ad-free lossless & Hi-Res personal music with zero ads on AVMusic. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.',
     images: [
       {
         url: '/icons/icon-512x512.png',
         width: 512,
         height: 512,
-        alt: 'iMusic Lossless Streaming',
+        alt: 'AVMusic Lossless Streaming',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'iMusic | Free Hi-Res & Lossless Music Streaming PWA',
+    title: 'AVMusic | Free Hi-Res & Lossless Music Streaming PWA',
     description:
-      'Stream ad-free lossless & Hi-Res personal music with zero ads. Import Spotify playlists and play YouTube audio directly.',
+      'Stream ad-free lossless & Hi-Res personal music with zero ads on AVMusic. Import Spotify playlists and play YouTube audio directly.',
     images: ['/icons/icon-512x512.png'],
   },
   robots: {
@@ -117,7 +121,7 @@ const structuredData = {
     {
       '@type': 'WebApplication',
       '@id': `${siteUrl}/#webapp`,
-      name: 'iMusic',
+      name: 'AVMusic',
       url: siteUrl,
       description:
         'Ad-free Hi-Res lossless music streaming Progressive Web App with Spotify playlist import and YouTube audio playback.',
@@ -148,7 +152,7 @@ const structuredData = {
       '@type': 'WebSite',
       '@id': `${siteUrl}/#website`,
       url: siteUrl,
-      name: 'iMusic',
+      name: 'AVMusic',
       description: 'Hi-Res Lossless Music Streaming PWA',
       potentialAction: {
         '@type': 'SearchAction',
@@ -162,42 +166,42 @@ const structuredData = {
       mainEntity: [
         {
           '@type': 'Question',
-          name: 'What is iMusic?',
+          name: 'What is AVMusic?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'iMusic is a free, ad-free Progressive Web App (PWA) designed for lossless and Hi-Res music streaming. It lets you import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect playback on iPhone, Android, and Desktop.',
+            text: 'AVMusic is a free, ad-free Progressive Web App (PWA) designed for lossless and Hi-Res music streaming. It lets you import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect playback on iPhone, Android, and Desktop.',
           },
         },
         {
           '@type': 'Question',
-          name: 'Is iMusic free to use?',
+          name: 'Is AVMusic free to use?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Yes, iMusic is 100% free with no monthly subscription fees, paywalls, or audio ads.',
+            text: 'Yes, AVMusic is 100% free with no monthly subscription fees, paywalls, or audio ads.',
           },
         },
         {
           '@type': 'Question',
-          name: 'How do I import Spotify playlists into iMusic?',
+          name: 'How do I import Spotify playlists into AVMusic?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Navigate to the Import page (https://imusic-two.vercel.app/import), paste your public Spotify playlist URL or link, and click Import. iMusic will ingest the entire tracklist and stream the music directly.',
+            text: 'Navigate to the Import page (https://imusic-two.vercel.app/import), paste your public Spotify playlist URL or link, and click Import. AVMusic will ingest the entire tracklist and stream the music directly.',
           },
         },
         {
           '@type': 'Question',
-          name: 'How do I install iMusic as an app on iPhone?',
+          name: 'How do I install AVMusic as an app on iPhone?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Open https://imusic-two.vercel.app in Safari on iOS, tap the Share icon at the bottom, and select "Add to Home Screen". iMusic will install as a native standalone PWA with lockscreen audio controls.',
+            text: 'Open https://imusic-two.vercel.app in Safari on iOS, tap the Share icon at the bottom, and select "Add to Home Screen". AVMusic will install as a native standalone PWA with lockscreen audio controls.',
           },
         },
         {
           '@type': 'Question',
-          name: 'Does iMusic support offline music playback?',
+          name: 'Does AVMusic support offline music playback?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Yes, iMusic caches streamed tracks locally in the browser IndexedDB storage so you can replay your favorite tracks without an internet connection.',
+            text: 'Yes, AVMusic caches streamed tracks locally in the browser IndexedDB storage so you can replay your favorite tracks without an internet connection.',
           },
         },
       ],
@@ -224,9 +228,9 @@ export default function RootLayout({
       </head>
       <body>
         <div className="sr-only">
-          <h1>iMusic | Free Hi-Res &amp; Lossless Music Streaming PWA</h1>
+          <h1>AVMusic | Free Hi-Res &amp; Lossless Music Streaming PWA</h1>
           <p>
-            Stream ad-free lossless and Hi-Res music online. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.
+            Stream ad-free lossless and Hi-Res music online with AVMusic. Import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect sound on iPhone, Android, and Desktop.
           </p>
         </div>
         <AppShell>{children}</AppShell>

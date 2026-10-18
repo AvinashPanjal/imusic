@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-static';
 
-const llmsContent = `# iMusic
+const llmsContent = `# AVMusic
 
 > Free Hi-Res & Lossless Music Streaming Progressive Web App (PWA).
 
-iMusic (https://imusic-two.vercel.app) is an open, ad-free music streaming web application designed for audiophile bit-perfect listening on iPhone, Android, and desktop browsers. It allows users to stream high-bitrate music (up to 320kbps & lossless FLAC), import public playlists directly from Spotify and YouTube, cache tracks locally for offline playback, and control audio from their device lockscreen without subscriptions or intrusive ads.
+AVMusic (https://imusic-two.vercel.app) is an open, ad-free music streaming web application designed for audiophile bit-perfect listening on iPhone, Android, and desktop browsers. It allows users to stream high-bitrate music (up to 320kbps & lossless FLAC), import public playlists directly from Spotify and YouTube, cache tracks locally for offline playback, and control audio from their device lockscreen without subscriptions or intrusive ads.
 
 ## Core Capabilities & Features
 - **Lossless & Hi-Res Audio Streaming**: Stream music with bit-perfect fidelity, up to 320 kbps AAC/MP3 and studio FLAC depth.
@@ -27,9 +27,9 @@ iMusic (https://imusic-two.vercel.app) is an open, ad-free music streaming web a
 - Robots Directives: https://imusic-two.vercel.app/robots.txt
 
 ## Frequently Asked Questions
-- **What is iMusic?**: iMusic is a free web app (PWA) for streaming music in high resolution without ads, supporting Spotify playlist import and YouTube audio playback.
-- **Is iMusic free?**: Yes, iMusic is 100% free with no monthly subscription fees.
-- **How to install iMusic on iPhone?**: Open https://imusic-two.vercel.app in Safari, tap the Share button, and select "Add to Home Screen".
+- **What is AVMusic?**: AVMusic is a free web app (PWA) for streaming music in high resolution without ads, supporting Spotify playlist import and YouTube audio playback.
+- **Is AVMusic free?**: Yes, AVMusic is 100% free with no monthly subscription fees.
+- **How to install AVMusic on iPhone?**: Open https://imusic-two.vercel.app in Safari, tap the Share button, and select "Add to Home Screen".
 - **How to import Spotify playlists?**: Go to https://imusic-two.vercel.app/import, paste any Spotify playlist link, and click Import to instantly stream the tracks.
 `;
 

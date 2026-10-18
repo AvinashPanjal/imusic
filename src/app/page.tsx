@@ -111,7 +111,7 @@ export default function HomePage() {
       {/* Top Header */}
       <header className={styles.header}>
         <div>
-          <span className={styles.subGreeting}>iMusic • Hi-Res & Lossless PWA</span>
+          <span className={styles.subGreeting}>AVMusic • Hi-Res & Lossless PWA</span>
           <h1 className={styles.greeting}>{greeting}</h1>
         </div>
         <div className={styles.headerActions}>
@@ -371,11 +371,11 @@ export default function HomePage() {
 
       {/* SEO & Discoverability Footer for Crawlers & Users */}
       <footer className={styles.seoFooter}>
-        <h2 className={styles.seoFooterTitle}>iMusic — Lossless & Hi-Res Music Streaming</h2>
+        <h2 className={styles.seoFooterTitle}>AVMusic — Lossless & Hi-Res Music Streaming</h2>
         <p className={styles.seoFooterDesc}>
-          iMusic is an ad-free Progressive Web App designed for audiophile bit-perfect sound. Stream your favorite songs in 320 kbps &amp; FLAC, import playlists directly from Spotify or YouTube, and enjoy seamless background playback with lockscreen controls on iPhone, Android, and Desktop.
+          AVMusic is an ad-free Progressive Web App designed for audiophile bit-perfect sound. Stream your favorite songs in 320 kbps &amp; FLAC, import playlists directly from Spotify or YouTube, and enjoy seamless background playback with lockscreen controls on iPhone, Android, and Desktop.
         </p>
-        <nav className={styles.seoFooterLinks} aria-label="Explore iMusic">
+        <nav className={styles.seoFooterLinks} aria-label="Explore AVMusic">
           <Link href="/search" className={styles.seoFooterLink}>Search Music</Link>
           <Link href="/library" className={styles.seoFooterLink}>Your Library &amp; Playlists</Link>
           <Link href="/import" className={styles.seoFooterLink}>Import Spotify &amp; Audio</Link>

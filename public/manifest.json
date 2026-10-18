@@ -1,6 +1,6 @@
 {
-  "name": "iMusic — Hi-Res Music Streaming",
-  "short_name": "iMusic",
+  "name": "AVMusic — Hi-Res Music Streaming",
+  "short_name": "AVMusic",
   "description": "iPhone-First Ad-Free Hi-Res Lossless Music Streaming PWA",
   "start_url": "/",
   "scope": "/",
