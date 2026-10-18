@@ -17,6 +17,26 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/api/stream/', '/api/playback/'],
       },
       {
+        userAgent: 'Google-Extended',
+        allow: '/',
+        disallow: ['/api/stream/', '/api/playback/'],
+      },
+      {
+        userAgent: 'GoogleOther',
+        allow: '/',
+        disallow: ['/api/stream/', '/api/playback/'],
+      },
+      {
+        userAgent: 'PerplexityBot',
+        allow: '/',
+        disallow: ['/api/stream/', '/api/playback/'],
+      },
+      {
+        userAgent: 'GPTBot',
+        allow: '/',
+        disallow: ['/api/stream/', '/api/playback/'],
+      },
+      {
         userAgent: 'Bingbot',
         allow: '/',
         disallow: ['/api/stream/', '/api/playback/'],

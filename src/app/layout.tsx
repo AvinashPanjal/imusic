@@ -156,6 +156,52 @@ const structuredData = {
         'query-input': 'required name=search_term_string',
       },
     },
+    {
+      '@type': 'FAQPage',
+      '@id': `${siteUrl}/#faq`,
+      mainEntity: [
+        {
+          '@type': 'Question',
+          name: 'What is iMusic?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'iMusic is a free, ad-free Progressive Web App (PWA) designed for lossless and Hi-Res music streaming. It lets you import Spotify playlists, play YouTube audio directly, and enjoy bit-perfect playback on iPhone, Android, and Desktop.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Is iMusic free to use?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes, iMusic is 100% free with no monthly subscription fees, paywalls, or audio ads.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'How do I import Spotify playlists into iMusic?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Navigate to the Import page (https://imusic-two.vercel.app/import), paste your public Spotify playlist URL or link, and click Import. iMusic will ingest the entire tracklist and stream the music directly.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'How do I install iMusic as an app on iPhone?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Open https://imusic-two.vercel.app in Safari on iOS, tap the Share icon at the bottom, and select "Add to Home Screen". iMusic will install as a native standalone PWA with lockscreen audio controls.',
+          },
+        },
+        {
+          '@type': 'Question',
+          name: 'Does iMusic support offline music playback?',
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: 'Yes, iMusic caches streamed tracks locally in the browser IndexedDB storage so you can replay your favorite tracks without an internet connection.',
+          },
+        },
+      ],
+    },
   ],
 };
 
