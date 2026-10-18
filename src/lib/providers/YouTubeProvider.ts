@@ -30,6 +30,18 @@ function parseDurationToSeconds(durationText?: string): number {
   return 180;
 }
 
+function isJunkMusicTitle(title: string, userQuery: string): boolean {
+  const t = title.toLowerCase();
+  const q = userQuery.toLowerCase();
+  const junkPatterns = ['slowed', 'reverb', '8d audio', 'bass boosted', 'ringtone', 'lofi', 'nightcore'];
+  for (const p of junkPatterns) {
+    if (t.includes(p) && !q.includes(p)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function searchYouTubeVideos(query: string, limit = 15): Promise<any[]> {
   try {
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&gl=IN&hl=en-GB`;
@@ -56,6 +68,15 @@ export async function searchYouTubeVideos(query: string, limit = 15): Promise<an
       data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
         ?.contents?.[0]?.itemSectionRenderer?.contents || [];
 
+    const qLower = query.toLowerCase();
+    const isLongExplicit =
+      qLower.includes('mix') ||
+      qLower.includes('album') ||
+      qLower.includes('podcast') ||
+      qLower.includes('set') ||
+      qLower.includes('full') ||
+      qLower.includes('jukebox');
+
     const videos: any[] = [];
     for (const item of contents) {
       if (item.videoRenderer) {
@@ -67,6 +88,13 @@ export async function searchYouTubeVideos(query: string, limit = 15): Promise<an
         const channelName =
           vr.ownerText?.runs?.[0]?.text || vr.shortBylineText?.runs?.[0]?.text || 'YouTube Creator';
         const durationText = vr.lengthText?.simpleText;
+        const durationSeconds = parseDurationToSeconds(durationText);
+
+        // Filter out non-music shorts (<45s) and 20m+ long videos unless explicit
+        if (durationSeconds < 45) continue;
+        if (durationSeconds > 1200 && !isLongExplicit) continue;
+        if (isJunkMusicTitle(rawTitle, query)) continue;
+
         const thumbnail =
           vr.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
           `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -76,6 +104,7 @@ export async function searchYouTubeVideos(query: string, limit = 15): Promise<an
           title: rawTitle,
           channel: channelName,
           durationText,
+          durationSeconds,
           thumbnail,
         });
 

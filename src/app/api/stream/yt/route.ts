@@ -30,7 +30,8 @@ let lastResolveError: string = '';
 
 // Pure Node.js stream decipherer with multi-client format fallback
 async function resolveViaInnertube(videoId: string): Promise<CachedStream | null> {
-  const clients = ['VISIONOS', 'YTMUSIC', 'ANDROID', 'ANDROID_VR', 'IOS'] as const;
+  // Benchmark tested: YTMUSIC (738ms), ANDROID_VR (752ms), IOS (1584ms), VISIONOS (1171ms)
+  const clients = ['YTMUSIC', 'ANDROID_VR', 'IOS', 'VISIONOS'] as const;
 
   try {
     const yt = await getInnertube();
@@ -64,6 +65,67 @@ async function resolveViaInnertube(videoId: string): Promise<CachedStream | null
     innertubeInstance = null; // Recreate session on next call if it became invalid
   }
 
+  return null;
+}
+
+// Fallback with rotating public proxy instances (Invidious / Piped) to bypass datacenter IP restrictions
+const PUBLIC_PROXIES = [
+  'https://invidious.f5.si',
+  'https://invidious.perennialte.ch',
+  'https://inv.nadeko.net',
+  'https://api.piped.private.coffee',
+];
+
+async function resolveViaProxy(videoId: string): Promise<CachedStream | null> {
+  const randomized = [...PUBLIC_PROXIES].sort(() => Math.random() - 0.5);
+  for (const inst of randomized) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+
+      if (inst.includes('invidious') || inst.includes('nadeko')) {
+        const res = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          const audios = (data.adaptiveFormats || []).filter((f: any) =>
+            (f.type || '').includes('audio')
+          );
+          const best = audios.find((f: any) => (f.type || '').includes('mp4a')) || audios[0];
+          if (best && best.url) {
+            return {
+              url: best.url,
+              contentLength: parseInt(best.contentLength || best.clen || '3500000', 10),
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+            };
+          }
+        }
+      } else {
+        const res = await fetch(`${inst}/streams/${videoId}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          const audios = data.audioStreams || [];
+          const best = audios.find((s: any) => (s.mimeType || '').includes('mp4a')) || audios[0];
+          if (best && best.url) {
+            return {
+              url: best.url,
+              contentLength: parseInt(best.contentLength || '3500000', 10),
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      lastResolveError += `[Proxy ${inst}: ${e?.message || e}] `;
+    }
+  }
   return null;
 }
 
@@ -136,7 +198,14 @@ async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | nu
       return streamInfo;
     }
 
-    // Attempt 2: Local yt-dlp fallback (if on host machine with yt-dlp)
+    // Attempt 2: Public rotated proxy fallback (Invidious / Piped)
+    const proxyInfo = await resolveViaProxy(videoId);
+    if (proxyInfo) {
+      streamUrlCache.set(videoId, proxyInfo);
+      return proxyInfo;
+    }
+
+    // Attempt 3: Local yt-dlp fallback (if on host machine with yt-dlp)
     const ytdlInfo = await resolveViaYtDlp(videoId);
     if (ytdlInfo) {
       streamUrlCache.set(videoId, ytdlInfo);

@@ -49,11 +49,6 @@ function extractYouTubeId(track: any): string | null {
   return null;
 }
 
-const isVercelEnvironment = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  return window.location.hostname.endsWith('vercel.app') || window.location.hostname.includes('vercel');
-};
-
 export const AudioEngine: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ytPlayerRef = useRef<any>(null);
@@ -556,18 +551,17 @@ export const AudioEngine: React.FC = () => {
 
     lastTrackIdRef.current = currentTrack.id;
     retryCountRef.current = 0;
+    directStreamFailedRef.current = false;
     setIsLoading(true);
     setError(null);
 
     let active = true;
 
     const ytId = extractYouTubeId(currentTrack);
-    const isVercel = isVercelEnvironment();
 
-    // On Vercel / cloud hosts, YouTube tracks play synchronously via the client player engine
-    // to preserve the mobile user-tap autoplay gesture and prevent browser autoplay blocking.
-    if (ytId && (isVercel || directStreamFailedRef.current)) {
-      console.log(`Streaming YouTube video ${ytId} via client player engine.`);
+    // If direct stream previously failed for this track, fallback to client player engine
+    if (ytId && directStreamFailedRef.current) {
+      console.log(`Streaming YouTube video ${ytId} via client player engine fallback.`);
       playViaYouTubePlayer(ytId);
       return;
     }
@@ -643,7 +637,7 @@ export const AudioEngine: React.FC = () => {
       }
 
       const resYtId = extractYouTubeId({ streamUrl: resolvedUrl });
-      if (resYtId && (isVercel || directStreamFailedRef.current)) {
+      if (resYtId && directStreamFailedRef.current) {
         console.log(`Resolved stream is YouTube (${resYtId}). Playing via client player engine.`);
         playViaYouTubePlayer(resYtId);
         return;
@@ -855,7 +849,7 @@ export const AudioEngine: React.FC = () => {
           const freshUrl = await resolveTrackUrl(currentTrack, true);
           if (freshUrl) {
             const freshYt = extractYouTubeId({ streamUrl: freshUrl });
-            if (freshYt && (isVercelEnvironment() || directStreamFailedRef.current)) {
+            if (freshYt && directStreamFailedRef.current) {
               console.log(`Alternative stream recovered as YouTube (${freshYt}). Seamlessly switching to client player.`);
               directStreamFailedRef.current = true;
               playViaYouTubePlayer(freshYt);
