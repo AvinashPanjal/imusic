@@ -461,16 +461,10 @@ export const AudioEngine: React.FC = () => {
         return track.streamUrl;
       }
 
-      // 3. Audio asset
+      // 3. Audio asset (only if not an unresolved YouTube reference)
       if (!forceRefresh) {
         const primaryAsset = track.assets?.[0];
-        if (primaryAsset) {
-          if (primaryAsset.storageKey?.startsWith('/api/stream/yt')) {
-            return primaryAsset.storageKey;
-          }
-          if (primaryAsset.storageKey?.startsWith('youtube:')) {
-            return `/api/stream/yt?v=${primaryAsset.storageKey.replace('youtube:', '')}`;
-          }
+        if (primaryAsset && !primaryAsset.storageKey?.includes('/api/stream/yt') && !primaryAsset.storageKey?.startsWith('youtube:')) {
           if (primaryAsset.storageType === 'remote_stream') {
             return primaryAsset.storageKey;
           }
