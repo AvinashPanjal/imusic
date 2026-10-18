@@ -64,6 +64,7 @@ export const AudioEngine: React.FC = () => {
   const directStreamFailedRef = useRef<boolean>(false);
   const retryCountRef = useRef<number>(0);
   const lastTrackIdRef = useRef<string | null>(null);
+  const isManualPauseRef = useRef<boolean>(false);
 
   const {
     currentTrack,
@@ -144,22 +145,66 @@ export const AudioEngine: React.FC = () => {
           [
             'play',
             () => {
+              isManualPauseRef.current = false;
               resume();
-              if (isYtModeRef.current && ytPlayerRef.current) {
-                try {
-                  ytPlayerRef.current.playVideo?.();
-                } catch {}
+              if (isYtModeRef.current) {
+                if (audioRef.current && audioRef.current.paused) {
+                  try {
+                    audioRef.current.play().catch(() => {});
+                  } catch {}
+                }
+                if (ytPlayerRef.current) {
+                  try {
+                    ytPlayerRef.current.playVideo?.();
+                  } catch {}
+                }
+              } else if (audioRef.current && audioRef.current.paused) {
+                audioRef.current.play().catch(() => {});
+              }
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
               }
             },
           ],
           [
             'pause',
             () => {
+              isManualPauseRef.current = true;
               pause();
+              if (audioRef.current && !audioRef.current.paused) {
+                try {
+                  audioRef.current.pause();
+                } catch {}
+              }
               if (isYtModeRef.current && ytPlayerRef.current) {
                 try {
                   ytPlayerRef.current.pauseVideo?.();
                 } catch {}
+              }
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+              }
+            },
+          ],
+          [
+            'stop',
+            () => {
+              isManualPauseRef.current = true;
+              pause();
+              if (audioRef.current) {
+                try {
+                  audioRef.current.pause();
+                  audioRef.current.currentTime = 0;
+                } catch {}
+              }
+              if (isYtModeRef.current && ytPlayerRef.current) {
+                try {
+                  ytPlayerRef.current.pauseVideo?.();
+                  ytPlayerRef.current.stopVideo?.();
+                } catch {}
+              }
+              if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'none';
               }
             },
           ],
@@ -206,6 +251,7 @@ export const AudioEngine: React.FC = () => {
   // Helper to play via client-side YouTube IFrame Player (bypasses datacenter blocks 100%)
   const playViaYouTubePlayer = useCallback(
     (videoId: string) => {
+      isManualPauseRef.current = false;
       isYtModeRef.current = true;
       setIsLoading(true);
       setError(null);
@@ -279,6 +325,7 @@ export const AudioEngine: React.FC = () => {
             onStateChange: (event: any) => {
               // 1: PLAYING, 2: PAUSED, 0: ENDED, 3: BUFFERING
               if (event.data === 1) {
+                isManualPauseRef.current = false;
                 setIsPlaying(true);
                 setIsLoading(false);
                 setNetworkInterrupted(false);
@@ -286,17 +333,22 @@ export const AudioEngine: React.FC = () => {
                   navigator.mediaSession.playbackState = 'playing';
                 }
               } else if (event.data === 2) {
-                const shouldBePlaying = usePlayerStore.getState().isPlaying;
-                if (shouldBePlaying && isYtModeRef.current) {
-                  // If browser or YouTube paused playback due to app switch or lock screen, auto-resume!
+                const shouldBePlaying = usePlayerStore.getState().isPlaying && !isManualPauseRef.current;
+                if (shouldBePlaying && isYtModeRef.current && document.visibilityState === 'hidden') {
+                  // If browser backgrounding caused YouTube iframe to pause, auto-resume
                   setTimeout(() => {
-                    if (usePlayerStore.getState().isPlaying && isYtModeRef.current) {
+                    if (usePlayerStore.getState().isPlaying && !isManualPauseRef.current && isYtModeRef.current) {
                       try {
                         ytPlayerRef.current?.playVideo?.();
                       } catch {}
                     }
                   }, 120);
                 } else {
+                  if (audioRef.current && !audioRef.current.paused) {
+                    try {
+                      audioRef.current.pause();
+                    } catch {}
+                  }
                   if ('mediaSession' in navigator) {
                     navigator.mediaSession.playbackState = 'paused';
                   }
@@ -342,12 +394,12 @@ export const AudioEngine: React.FC = () => {
     if (typeof window === 'undefined') return;
 
     const handleBackgroundEvent = (e: Event) => {
-      if (isYtModeRef.current && usePlayerStore.getState().isPlaying) {
+      if (isYtModeRef.current && usePlayerStore.getState().isPlaying && !isManualPauseRef.current) {
         try {
           e.stopImmediatePropagation();
         } catch {}
         setTimeout(() => {
-          if (isYtModeRef.current && usePlayerStore.getState().isPlaying) {
+          if (isYtModeRef.current && usePlayerStore.getState().isPlaying && !isManualPauseRef.current) {
             try {
               ytPlayerRef.current?.playVideo?.();
             } catch {}
@@ -619,16 +671,20 @@ export const AudioEngine: React.FC = () => {
   useEffect(() => {
     if (isYtModeRef.current) {
       if (!isPlaying) {
+        isManualPauseRef.current = true;
         try {
           ytPlayerRef.current?.pauseVideo?.();
         } catch {}
         if (audioRef.current && !audioRef.current.paused) {
-          audioRef.current.pause();
+          try {
+            audioRef.current.pause();
+          } catch {}
         }
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'paused';
         }
       } else {
+        isManualPauseRef.current = false;
         try {
           ytPlayerRef.current?.playVideo?.();
         } catch {}
@@ -749,11 +805,15 @@ export const AudioEngine: React.FC = () => {
     };
 
     const handlePause = () => {
-      if (isYtModeRef.current) return;
-      if (!usePlayerStore.getState().isPlaying) {
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'paused';
-        }
+      isManualPauseRef.current = true;
+      pause();
+      if (isYtModeRef.current && ytPlayerRef.current) {
+        try {
+          ytPlayerRef.current.pauseVideo?.();
+        } catch {}
+      }
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
       }
     };
 
