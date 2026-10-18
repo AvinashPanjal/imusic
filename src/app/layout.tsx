@@ -3,7 +3,7 @@ import '@/styles/globals.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL || 'https://imusic-two.vercel.app';
+  process.env.NEXT_PUBLIC_SITE_URL || 'https://avmusic.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -185,7 +185,7 @@ const structuredData = {
           name: 'How do I import Spotify playlists into AVMusic?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Navigate to the Import page (https://imusic-two.vercel.app/import), paste your public Spotify playlist URL or link, and click Import. AVMusic will ingest the entire tracklist and stream the music directly.',
+            text: `Navigate to the Import page (${siteUrl}/import), paste your public Spotify playlist URL or link, and click Import. AVMusic will ingest the entire tracklist and stream the music directly.`,
           },
         },
         {
@@ -193,7 +193,7 @@ const structuredData = {
           name: 'How do I install AVMusic as an app on iPhone?',
           acceptedAnswer: {
             '@type': 'Answer',
-            text: 'Open https://imusic-two.vercel.app in Safari on iOS, tap the Share icon at the bottom, and select "Add to Home Screen". AVMusic will install as a native standalone PWA with lockscreen audio controls.',
+            text: `Open ${siteUrl} in Safari on iOS, tap the Share icon at the bottom, and select "Add to Home Screen". AVMusic will install as a native standalone PWA with lockscreen audio controls.`,
           },
         },
         {

@@ -6,7 +6,7 @@ const llmsContent = `# AVMusic
 
 > Free Hi-Res & Lossless Music Streaming Progressive Web App (PWA).
 
-AVMusic (https://imusic-two.vercel.app) is an open, ad-free music streaming web application designed for audiophile bit-perfect listening on iPhone, Android, and desktop browsers. It allows users to stream high-bitrate music (up to 320kbps & lossless FLAC), import public playlists directly from Spotify and YouTube, cache tracks locally for offline playback, and control audio from their device lockscreen without subscriptions or intrusive ads.
+AVMusic (https://avmusic.vercel.app) is an open, ad-free music streaming web application designed for audiophile bit-perfect listening on iPhone, Android, and desktop browsers. It allows users to stream high-bitrate music (up to 320kbps & lossless FLAC), import public playlists directly from Spotify and YouTube, cache tracks locally for offline playback, and control audio from their device lockscreen without subscriptions or intrusive ads.
 
 ## Core Capabilities & Features
 - **Lossless & Hi-Res Audio Streaming**: Stream music with bit-perfect fidelity, up to 320 kbps AAC/MP3 and studio FLAC depth.
@@ -18,19 +18,19 @@ AVMusic (https://imusic-two.vercel.app) is an open, ad-free music streaming web 
 - **Custom Playlists & Favorites**: Organize music into personalized playlists and quick-access favorites.
 
 ## Key URLs & Endpoints
-- Home: https://imusic-two.vercel.app/
-- Search: https://imusic-two.vercel.app/search
-- Library & Playlists: https://imusic-two.vercel.app/library
-- Playlist & Audio Import: https://imusic-two.vercel.app/import
-- Audio & Stream Settings: https://imusic-two.vercel.app/settings
-- XML Sitemap: https://imusic-two.vercel.app/sitemap.xml
-- Robots Directives: https://imusic-two.vercel.app/robots.txt
+- Home: https://avmusic.vercel.app/
+- Search: https://avmusic.vercel.app/search
+- Library & Playlists: https://avmusic.vercel.app/library
+- Playlist & Audio Import: https://avmusic.vercel.app/import
+- Audio & Stream Settings: https://avmusic.vercel.app/settings
+- XML Sitemap: https://avmusic.vercel.app/sitemap.xml
+- Robots Directives: https://avmusic.vercel.app/robots.txt
 
 ## Frequently Asked Questions
 - **What is AVMusic?**: AVMusic is a free web app (PWA) for streaming music in high resolution without ads, supporting Spotify playlist import and YouTube audio playback.
 - **Is AVMusic free?**: Yes, AVMusic is 100% free with no monthly subscription fees.
-- **How to install AVMusic on iPhone?**: Open https://imusic-two.vercel.app in Safari, tap the Share button, and select "Add to Home Screen".
-- **How to import Spotify playlists?**: Go to https://imusic-two.vercel.app/import, paste any Spotify playlist link, and click Import to instantly stream the tracks.
+- **How to install AVMusic on iPhone?**: Open https://avmusic.vercel.app in Safari, tap the Share button, and select "Add to Home Screen".
+- **How to import Spotify playlists?**: Go to https://avmusic.vercel.app/import, paste any Spotify playlist link, and click Import to instantly stream the tracks.
 `;
 
 export async function GET() {

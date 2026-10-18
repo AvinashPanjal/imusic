@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL || 'https://imusic-two.vercel.app';
+    process.env.NEXT_PUBLIC_SITE_URL || 'https://avmusic.vercel.app';
 
   const now = new Date();
 
