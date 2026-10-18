@@ -155,7 +155,6 @@ export class YouTubeProvider implements CatalogueProvider {
         id: trackId,
         title: cleanTitle,
         duration: durationSeconds,
-        streamUrl: `/api/stream/yt?v=${v.id}`,
         trackNumber: i + 1,
         genre: 'YouTube Music',
         artists: [

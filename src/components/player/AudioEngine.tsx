@@ -618,13 +618,13 @@ export const AudioEngine: React.FC = () => {
       return;
     }
 
-    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN) or local stream
-    if (currentTrack.streamUrl) {
-      if (currentTrack.streamUrl.startsWith('youtube:')) {
-        startAudioPlayback(`/api/stream/yt?v=${currentTrack.streamUrl.replace('youtube:', '')}`);
-      } else {
-        startAudioPlayback(currentTrack.streamUrl);
-      }
+    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN or external audio CDN)
+    if (
+      currentTrack.streamUrl &&
+      !currentTrack.streamUrl.includes('/api/stream/yt') &&
+      !currentTrack.streamUrl.startsWith('youtube:')
+    ) {
+      startAudioPlayback(currentTrack.streamUrl);
       const curIdx = queue.findIndex((t) => t.id === currentTrack.id);
       const nextItem = curIdx >= 0 && curIdx + 1 < queue.length ? queue[curIdx + 1] : null;
       if (nextItem && !nextItem.streamUrl && !preResolvedUrlsRef.current.has(nextItem.id)) {
@@ -632,11 +632,6 @@ export const AudioEngine: React.FC = () => {
           if (preUrl) preResolvedUrlsRef.current.set(nextItem.id, preUrl);
         });
       }
-      return;
-    }
-
-    if (currentTrack.id?.startsWith('yt-')) {
-      startAudioPlayback(`/api/stream/yt?v=${currentTrack.id.replace('yt-', '')}`);
       return;
     }
 
@@ -653,9 +648,10 @@ export const AudioEngine: React.FC = () => {
         return;
       }
 
-      const resYtId = extractYouTubeId({ streamUrl: resolvedUrl });
-      if (resYtId && directStreamFailedRef.current) {
-        console.log(`Resolved stream is YouTube (${resYtId}). Playing via client player engine.`);
+      // If the resolved stream is YouTube-only (not on studio CDN), play via client engine
+      const resYtId = extractYouTubeId({ streamUrl: resolvedUrl }) || ytId;
+      if (resYtId && (resolvedUrl.includes('/api/stream/yt') || directStreamFailedRef.current)) {
+        console.log(`Playing YouTube stream (${resYtId}) via client player engine.`);
         playViaYouTubePlayer(resYtId);
         return;
       }
