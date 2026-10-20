@@ -448,12 +448,18 @@ export const AudioEngine: React.FC = () => {
     async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
       if (!track) return null;
 
-      // 1. YouTube direct stream URL
+      // 1. YouTube direct stream URL or YouTube ID
       if (track.streamUrl && track.streamUrl.startsWith('/api/stream/yt')) {
         return track.streamUrl;
       }
       if (track.streamUrl && track.streamUrl.startsWith('youtube:')) {
         return `/api/stream/yt?v=${track.streamUrl.replace('youtube:', '')}`;
+      }
+      if (track.id && track.id.startsWith('yt-')) {
+        return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
+      }
+      if (track.id && track.id.startsWith('foreign-') && /^[a-zA-Z0-9_-]{11}$/.test(track.id.replace('foreign-', '')) && track.providerCode === 'youtube') {
+        return `/api/stream/yt?v=${track.id.replace('foreign-', '')}`;
       }
 
       // 2. Direct standard audio URL (JioSaavn CDN, Audius, CC, etc.)
