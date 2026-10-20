@@ -151,17 +151,21 @@ async function resolveViaYtDlp(videoId: string): Promise<CachedStream | null> {
   return null;
 }
 
-// Master stream resolver: Pure Node.js VISIONOS first, local CLI fallback
-async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | null> {
+// Master stream resolver: Cloudflare Worker first, Innertube, Proxies, yt-dlp fallback
+async function resolveAudioStreamUrl(videoId: string, forceRefresh = false): Promise<CachedStream | null> {
   // 1. Check memory cache (instant <1ms response)
-  const cached = streamUrlCache.get(videoId);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached;
+  if (!forceRefresh) {
+    const cached = streamUrlCache.get(videoId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached;
+    }
+  } else {
+    streamUrlCache.delete(videoId);
   }
 
   // 2. Deduplicate ongoing requests for the same video
   const ongoing = ongoingResolves.get(videoId);
-  if (ongoing) {
+  if (ongoing && !forceRefresh) {
     return ongoing;
   }
 
@@ -179,10 +183,11 @@ async function resolveAudioStreamUrl(videoId: string): Promise<CachedStream | nu
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.streamUrl) {
+          const targetUrl = data.directUrl || data.streamUrl;
+          if (targetUrl) {
             const serverInfo: CachedStream = {
-              url: data.streamUrl,
-              contentLength: 3500000,
+              url: targetUrl,
+              contentLength: data.contentLength || 3500000,
               expiresAt: Date.now() + 4 * 3600 * 1000,
             };
             streamUrlCache.set(videoId, serverInfo);
@@ -237,17 +242,16 @@ export async function HEAD(request: NextRequest) {
     }
 
     const streamInfo = await resolveAudioStreamUrl(videoId);
-    if (!streamInfo) {
+    if (!streamInfo || !streamInfo.url) {
       return new NextResponse(null, { status: 404 });
     }
 
-    return new NextResponse(null, {
-      status: 200,
+    return NextResponse.redirect(streamInfo.url, {
+      status: 307,
       headers: {
-        'Content-Type': 'audio/mp4',
-        'Content-Length': String(streamInfo.contentLength || 3500000),
-        'Accept-Ranges': 'bytes',
         'Cache-Control': 'public, max-age=14400, immutable',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
       },
     });
   } catch (err) {
@@ -260,90 +264,34 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const videoId = searchParams.get('v') || searchParams.get('id');
+    const refresh = searchParams.get('refresh') === '1' || searchParams.get('refresh') === 'true';
 
     if (!videoId || !/^[\w-]{11}$/.test(videoId)) {
       return NextResponse.json({ error: 'Invalid or missing YouTube video ID' }, { status: 400 });
     }
 
-    // 0. If a dedicated stream server is configured, forward Range request directly for 100% cloud audio streaming
-    const streamServer =
-      process.env.STREAM_SERVER_URL ||
-      process.env.EXTERNAL_STREAM_URL ||
-      'https://avmusic-streamer.efootballpes2012.workers.dev';
-    if (streamServer) {
-      try {
-        const cleanServer = streamServer.replace(/\/$/, '');
-        const clientRange = request.headers.get('range') || 'bytes=0-';
-        const streamRes = await fetch(`${cleanServer}/stream?v=${videoId}`, {
-          headers: { Range: clientRange },
-        });
-        if (streamRes.ok || streamRes.status === 206) {
-          const respHeaders = new Headers();
-          const contentType = streamRes.headers.get('content-type') || 'audio/mp4';
-          respHeaders.set('Content-Type', contentType.startsWith('audio/') ? contentType : 'audio/mp4');
-          respHeaders.set('Accept-Ranges', 'bytes');
-          respHeaders.set('Cache-Control', 'public, max-age=14400, immutable');
-          if (streamRes.headers.get('content-length')) {
-            respHeaders.set('Content-Length', streamRes.headers.get('content-length')!);
-          }
-          if (streamRes.headers.get('content-range')) {
-            respHeaders.set('Content-Range', streamRes.headers.get('content-range')!);
-          }
-          return new NextResponse(streamRes.body, {
-            status: streamRes.status,
-            headers: respHeaders,
-          });
-        }
-      } catch (proxyErr) {
-        console.warn('Proxy to STREAM_SERVER_URL failed, falling back to local resolver:', proxyErr);
-      }
-    }
-
-    // Resolve direct audio stream URL
-    const streamInfo = await resolveAudioStreamUrl(videoId);
-    if (!streamInfo) {
+    // Resolve direct audio stream URL (cached or fresh from Cloudflare worker)
+    const streamInfo = await resolveAudioStreamUrl(videoId, refresh);
+    if (!streamInfo || !streamInfo.url) {
       return NextResponse.json({
         error: 'Could not resolve playable audio stream',
         diagnostics: lastResolveError || 'no resolver succeeded',
       }, { status: 404 });
     }
 
-    // Forward HTTP Range header for seeking and partial buffering (default to bytes=0- to prevent 403 on open downloads)
-    const clientRange = request.headers.get('range');
-    const upstreamRange = clientRange || 'bytes=0-';
+    // Return 307 Temporary Redirect pointing directly to Google Video CDN URL.
+    // The mobile phone's native media player (AVPlayer on iOS / ExoPlayer on Android)
+    // follows this redirect and streams audio directly over the user's mobile carrier / WiFi connection.
+    // This enables native lock screen controls, background playback when phone is locked, and avoids Vercel lambda timeouts.
+    const redirectHeaders = new Headers();
+    redirectHeaders.set('Cache-Control', 'public, max-age=14400, immutable');
+    redirectHeaders.set('Access-Control-Allow-Origin', '*');
+    redirectHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    redirectHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
 
-    const upstreamHeaders: Record<string, string> = {
-      Range: upstreamRange,
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-    };
-
-    const upstreamRes = await fetch(streamInfo.url, {
-      method: 'GET',
-      headers: upstreamHeaders,
-    });
-
-    if (!upstreamRes.ok && upstreamRes.status >= 400) {
-      streamUrlCache.delete(videoId);
-    }
-
-    const responseHeaders = new Headers();
-    const upstreamType = upstreamRes.headers.get('content-type');
-    const safeType = upstreamType && upstreamType.startsWith('audio/') ? upstreamType : 'audio/mp4';
-    responseHeaders.set('Content-Type', safeType);
-    responseHeaders.set('Accept-Ranges', 'bytes');
-    responseHeaders.set('Cache-Control', 'public, max-age=14400, immutable');
-
-    if (upstreamRes.headers.get('content-length')) {
-      responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length')!);
-    }
-    if (upstreamRes.headers.get('content-range')) {
-      responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range')!);
-    }
-
-    return new NextResponse(upstreamRes.body, {
-      status: upstreamRes.status,
-      headers: responseHeaders,
+    return NextResponse.redirect(streamInfo.url, {
+      status: 307,
+      headers: redirectHeaders,
     });
   } catch (error) {
     console.error('YouTube audio streaming error:', error);

@@ -86,7 +86,7 @@ export default {
       }
     }
 
-    // 4. /stream Endpoint: Pipes raw audio chunks with Range support
+    // 4. /stream Endpoint: Redirects (307) directly to Google Video CDN for seamless mobile streaming
     if (url.pathname === '/stream' || url.pathname.startsWith('/stream/')) {
       const directTarget = url.searchParams.get('url');
       let targetAudioUrl = directTarget;
@@ -110,7 +110,23 @@ export default {
         }
       }
 
-      // Forward client Range header (critical for audio scrubbing and background buffering)
+      // Default: Return 307 Temporary Redirect to the direct Google Video CDN URL.
+      // The mobile phone's native player (AVPlayer on iOS Safari, ExoPlayer on Android)
+      // follows this redirect and downloads audio directly from Google's edge cache
+      // using the phone's mobile carrier / WiFi connection without Cloudflare CPU/timeout limits.
+      const shouldProxy = url.searchParams.get('proxy') === 'true';
+      if (!shouldProxy) {
+        return new Response(null, {
+          status: 307,
+          headers: {
+            ...CORS_HEADERS,
+            Location: targetAudioUrl,
+            'Cache-Control': 'public, max-age=14400, immutable',
+          },
+        });
+      }
+
+      // Optional proxy mode for environments where direct redirects are prohibited
       const clientRange = request.headers.get('range') || 'bytes=0-';
 
       try {

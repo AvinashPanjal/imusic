@@ -621,18 +621,27 @@ export const AudioEngine: React.FC = () => {
       return;
     }
 
-    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN or external audio CDN)
-    if (
-      currentTrack.streamUrl &&
-      !currentTrack.streamUrl.includes('/api/stream/yt') &&
-      !currentTrack.streamUrl.startsWith('youtube:')
-    ) {
-      startAudioPlayback(currentTrack.streamUrl);
+    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN, Audius, or YouTube direct stream)
+    const directPlayUrl =
+      currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')
+        ? currentTrack.streamUrl
+        : ytId
+        ? `/api/stream/yt?v=${ytId}`
+        : null;
+
+    if (directPlayUrl) {
+      startAudioPlayback(directPlayUrl);
       const curIdx = queue.findIndex((t) => t.id === currentTrack.id);
       const nextItem = curIdx >= 0 && curIdx + 1 < queue.length ? queue[curIdx + 1] : null;
-      if (nextItem && !nextItem.streamUrl && !preResolvedUrlsRef.current.has(nextItem.id)) {
+      if (nextItem && !preResolvedUrlsRef.current.has(nextItem.id)) {
         resolveTrackUrl(nextItem).then((preUrl) => {
-          if (preUrl) preResolvedUrlsRef.current.set(nextItem.id, preUrl);
+          if (preUrl) {
+            preResolvedUrlsRef.current.set(nextItem.id, preUrl);
+            const nextYt = extractYouTubeId({ streamUrl: preUrl }) || extractYouTubeId(nextItem);
+            if (nextYt) {
+              fetch(`/api/stream/yt?v=${nextYt}`, { method: 'HEAD' }).catch(() => {});
+            }
+          }
         });
       }
       return;
@@ -857,10 +866,29 @@ export const AudioEngine: React.FC = () => {
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
-      // If this track or current audio.src has a YouTube video ID, seamlessly switch to client YouTube player!
       const ytId = extractYouTubeId(currentTrack) || (audio.src ? extractYouTubeId({ streamUrl: audio.src }) : null);
-      if (ytId) {
-        console.log(`Direct audio stream failed for ${ytId}. Seamlessly switching to YouTube client engine.`);
+
+      // On mobile devices (iOS Safari / Android), native <audio> is the ONLY player that supports background lockscreen playback.
+      // If a connection drops, retry direct stream with a fresh 307 redirect up to 2 times before giving up.
+      if (ytId && retryCountRef.current < 2) {
+        retryCountRef.current += 1;
+        console.log(`Retrying direct YouTube stream for ${ytId} (attempt ${retryCountRef.current})...`);
+        const retryUrl = `/api/stream/yt?v=${ytId}&refresh=1&t=${Date.now()}`;
+        if (audio) {
+          audio.src = retryUrl;
+          audio.load();
+          audio.play().catch(() => {});
+        }
+        return;
+      }
+
+      // Check if user is on mobile
+      const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      // Only fallback to YouTube iframe on desktop where background tab playback is allowed.
+      // On mobile, YouTube iframes are strictly killed by the OS upon screen lock.
+      if (ytId && !isMobile) {
+        console.log(`Direct audio stream failed on desktop for ${ytId}. Falling back to YouTube iframe player.`);
         directStreamFailedRef.current = true;
         playViaYouTubePlayer(ytId);
         return;
@@ -871,21 +899,12 @@ export const AudioEngine: React.FC = () => {
         console.log(`Attempting stream recovery for track: ${currentTrack.title}`);
         try {
           const freshUrl = await resolveTrackUrl(currentTrack, true);
-          if (freshUrl) {
-            const freshYt = extractYouTubeId({ streamUrl: freshUrl });
-            if (freshYt && directStreamFailedRef.current) {
-              console.log(`Alternative stream recovered as YouTube (${freshYt}). Seamlessly switching to client player.`);
-              directStreamFailedRef.current = true;
-              playViaYouTubePlayer(freshYt);
-              return;
-            }
-            if (audio) {
-              console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
-              audio.src = freshUrl;
-              audio.load();
-              audio.play().catch(() => {});
-              return;
-            }
+          if (freshUrl && audio) {
+            console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
+            audio.src = freshUrl;
+            audio.load();
+            audio.play().catch(() => {});
+            return;
           }
         } catch (recoverErr) {
           console.warn('Alternative stream recovery attempt failed:', recoverErr);
