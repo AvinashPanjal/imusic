@@ -111,6 +111,24 @@ input:focus, select:focus, textarea:focus {
   background: var(--bg-surface-4);
 }
 
+@media (min-width: 1024px) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
 /* Range input styling for audio scrubber and volume */
 input[type="range"] {
   -webkit-appearance: none;

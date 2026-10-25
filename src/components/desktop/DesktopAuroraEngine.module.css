@@ -1,0 +1,108 @@
+.auroraContainer {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .auroraContainer {
+    display: block;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+}
+
+.auroraOrb1 {
+  position: absolute;
+  top: -15%;
+  left: 25%;
+  width: 700px;
+  height: 700px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--aurora-glow-1, rgba(124, 58, 237, 0.22)) 0%, transparent 70%);
+  filter: blur(80px);
+  -webkit-filter: blur(80px);
+  opacity: 0.7;
+  transform: translate3d(0, 0, 0);
+  animation: floatOrb1 20s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.auroraOrb2 {
+  position: absolute;
+  top: 25%;
+  right: -10%;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--aurora-glow-2, rgba(244, 63, 94, 0.16)) 0%, transparent 70%);
+  filter: blur(90px);
+  -webkit-filter: blur(90px);
+  opacity: 0.6;
+  transform: translate3d(0, 0, 0);
+  animation: floatOrb2 25s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.auroraOrb3 {
+  position: absolute;
+  bottom: 5%;
+  left: 35%;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.12) 0%, transparent 70%);
+  filter: blur(85px);
+  -webkit-filter: blur(85px);
+  opacity: 0.5;
+  transform: translate3d(0, 0, 0);
+  animation: floatOrb3 18s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.subtleGridPattern {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.4;
+  mask-image: radial-gradient(ellipse at 50% 30%, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 30%, black 40%, transparent 80%);
+}
+
+@keyframes floatOrb1 {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(60px, 40px) scale(1.1);
+  }
+  100% {
+    transform: translate(-30px, 70px) scale(0.95);
+  }
+}
+
+@keyframes floatOrb2 {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-50px, -30px) scale(1.08);
+  }
+  100% {
+    transform: translate(30px, 50px) scale(0.92);
+  }
+}
+
+@keyframes floatOrb3 {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-40px, 30px) scale(1.12);
+  }
+  100% {
+    transform: translate(50px, -20px) scale(0.96);
+  }
+}

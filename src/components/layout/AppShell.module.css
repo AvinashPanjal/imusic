@@ -27,16 +27,16 @@
 
 @media (min-width: 1024px) {
   .shell {
-    padding-left: 260px; /* Space for desktop sidebar */
+    padding-left: 280px; /* Space for expanded desktop sidebar */
   }
 
   .mainContent {
-    padding-bottom: calc(var(--mini-player-height) + 40px);
-    padding-top: 24px;
+    padding-bottom: 110px; /* Space for desktop Studio Player Dock */
+    padding-top: 0;
   }
 
   .pageInner {
-    max-width: 1080px;
-    padding: 0 32px;
+    max-width: 1440px;
+    padding: 16px 40px 60px 40px;
   }
 }

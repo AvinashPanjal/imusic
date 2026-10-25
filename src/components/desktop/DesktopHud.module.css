@@ -1,0 +1,61 @@
+.hud {
+  position: fixed;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 18, 24, 0.92);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-full);
+  box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.8), 0 0 20px var(--accent-glow);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 200;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  animation: hudPop 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.icon {
+  color: var(--accent-hover);
+  flex-shrink: 0;
+}
+
+.barTrack {
+  width: 90px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.barFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-hover));
+  border-radius: var(--radius-full);
+  transition: width 100ms ease-out;
+}
+
+.text {
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: right;
+  color: var(--text-primary);
+}
+
+@keyframes hudPop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}

@@ -34,12 +34,9 @@
 }
 
 @media (min-width: 1024px) {
+  /* On desktop, the Master Studio Player Dock takes over */
   .miniPlayer {
-    left: calc(260px + 24px);
-    right: 24px;
-    bottom: 16px;
-    max-width: 720px;
-    height: 64px;
+    display: none !important;
   }
 }
 

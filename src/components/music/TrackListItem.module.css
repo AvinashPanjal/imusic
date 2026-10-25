@@ -19,6 +19,26 @@
   background: var(--accent-subtle);
 }
 
+@media (min-width: 1024px) {
+  .row {
+    padding: 10px 14px;
+    border: 1px solid transparent;
+    transition: all var(--transition-fast);
+  }
+
+  .row:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.09);
+    transform: translateX(4px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  .rowActive {
+    background: var(--accent-subtle) !important;
+    border-color: var(--accent-glow) !important;
+  }
+}
+
 .artworkWrapper {
   position: relative;
   width: 44px;

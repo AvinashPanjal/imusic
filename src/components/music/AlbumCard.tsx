@@ -52,6 +52,9 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({ album }) => {
             <Sparkles size={10} /> Hi-Res
           </div>
         )}
+        <div className={styles.hoverPlayOverlay} title={`View ${album.title}`}>
+          <Play size={18} fill="currentColor" style={{ marginLeft: 2 }} />
+        </div>
       </div>
 
       <div className={styles.info}>

@@ -10,11 +10,14 @@
     top: 0;
     left: 0;
     bottom: 0;
-    width: 260px;
-    background: var(--bg-surface-1);
-    border-right: 1px solid var(--border-subtle);
-    padding: 24px 16px;
+    width: 280px;
+    background: rgba(14, 14, 18, 0.88);
+    backdrop-filter: blur(36px) saturate(190%);
+    -webkit-backdrop-filter: blur(36px) saturate(190%);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 24px 18px;
     z-index: 100;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -22,21 +25,34 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 8px 24px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 20px;
+  padding: 0 6px 20px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 22px;
 }
 
 .logoIcon {
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-md);
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-hover));
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px var(--accent-glow);
+  box-shadow: 0 4px 18px var(--accent-glow);
+  position: relative;
+  overflow: hidden;
+}
+
+.logoIcon::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: logoShine 4s infinite;
 }
 
 .brandText {
@@ -46,71 +62,200 @@
 }
 
 .brandName {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #ffffff 60%, var(--accent-hover) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .brandBadge {
   font-size: 10px;
   color: var(--badge-hires-text);
-  font-weight: 600;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.navMenu {
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  flex: 1;
+  gap: 20px;
+  margin-right: -8px;
+  padding-right: 8px;
+}
+
+.sectionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionHeader {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  padding: 6px 12px;
 }
 
 .navLink {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
   padding: 10px 14px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 500;
   transition: all var(--transition-fast);
+  position: relative;
+}
+
+.navLinkLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .navLink:hover {
-  background: var(--bg-surface-2);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
+  transform: translateX(2px);
 }
 
 .navLinkActive {
-  background: var(--accent-subtle);
-  color: var(--accent-hover);
+  background: var(--accent-subtle) !important;
+  color: var(--accent-hover) !important;
   font-weight: 600;
+}
+
+.navLinkActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3.5px;
+  border-radius: var(--radius-full);
+  background: var(--accent-hover);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .linkIcon {
   flex-shrink: 0;
+  transition: transform var(--transition-fast);
 }
 
-.footerNote {
-  padding: 12px;
-  background: var(--bg-surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+.navLink:hover .linkIcon {
+  transform: scale(1.1);
 }
 
-.footerDevice {
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 5px;
+  border-radius: var(--radius-xs);
+}
+
+.heartIconBox {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(135deg, #f43f5e, #be123c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.4);
+}
+
+/* Engine Monitor Widget */
+.engineWidget {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.engineRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.engineTitle {
   font-size: 11px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 2px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.footerNotice {
+.engineDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-success);
+  box-shadow: 0 0 6px var(--status-success);
+}
+
+.engineBitrate {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--badge-hires-text);
+  font-family: ui-monospace, monospace;
+}
+
+.engineDesc {
   font-size: 11px;
   color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+.shortcutsPill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: 12px;
+}
+
+.shortcutsPill:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+@keyframes logoShine {
+  0% { left: -100%; }
+  20% { left: 100%; }
+  100% { left: 100%; }
 }
