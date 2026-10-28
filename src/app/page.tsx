@@ -1,26 +1,58 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { TrackData, AlbumSummary, PlaylistData } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
+import { TrackCard } from '@/components/music/TrackCard';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { HeroSpotlight } from '@/components/home/HeroSpotlight';
 import { CategoryGrid } from '@/components/home/CategoryGrid';
-import { Sparkles, UploadCloud, Library, Disc, Film, Settings, Compass } from 'lucide-react';
+import { LocalLibrary } from '@/lib/storage/localLibrary';
+import { usePlayerStore } from '@/store/playerStore';
+import {
+  Sparkles,
+  UploadCloud,
+  Library,
+  Disc,
+  Film,
+  Settings,
+  Compass,
+  Flame,
+  History,
+  Play,
+  LayoutGrid,
+  List,
+  Music2,
+  Headphones,
+} from 'lucide-react';
 import styles from './page.module.css';
+
+type LanguageFilter = 'all' | 'malayalam' | 'tamil' | 'hindi';
 
 export default function HomePage() {
   const [greeting, setGreeting] = useState('Good music');
-  const [recentTracks, setRecentTracks] = useState<TrackData[]>([]);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<TrackData[]>([]);
+  const [spotlightTracks, setSpotlightTracks] = useState<TrackData[]>([]);
+  const [trendingAll, setTrendingAll] = useState<TrackData[]>([]);
+  const [malayalamTrending, setMalayalamTrending] = useState<TrackData[]>([]);
+  const [tamilTrending, setTamilTrending] = useState<TrackData[]>([]);
+  const [hindiTrending, setHindiTrending] = useState<TrackData[]>([]);
+  const [newAlbums, setNewAlbums] = useState<AlbumSummary[]>([]);
   const [hiResTracks, setHiResTracks] = useState<TrackData[]>([]);
-  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+  const [localAlbums, setLocalAlbums] = useState<AlbumSummary[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
-  const [openTracks, setOpenTracks] = useState<TrackData[]>([]);
-  const [onlineTrending, setOnlineTrending] = useState<TrackData[]>([]);
-  const [indianTracks, setIndianTracks] = useState<TrackData[]>([]);
-  const [selectedLanguage, setSelectedLanguage] = useState<'all' | 'tamil' | 'malayalam' | 'hindi' | 'global'>('all');
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageFilter>('all');
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
   const [loading, setLoading] = useState(true);
+
+  const { playTrack } = usePlayerStore();
+
+  // Load recently played tracks from LocalLibrary
+  const refreshRecentlyPlayed = useCallback(() => {
+    const list = LocalLibrary.getRecentlyPlayed();
+    setRecentlyPlayed(list);
+  }, []);
 
   useEffect(() => {
     // Dynamic greeting based on time of day
@@ -29,58 +61,49 @@ export default function HomePage() {
     else if (hour < 18) setGreeting('Good afternoon');
     else setGreeting('Good evening');
 
-    // Fetch initial data
+    // Initial load of recently played
+    refreshRecentlyPlayed();
+
+    // Listen to live updates whenever a song is played
+    const handleRecentUpdate = () => {
+      refreshRecentlyPlayed();
+    };
+    window.addEventListener('imusic:recently_played_updated', handleRecentUpdate);
+
+    // Fetch dynamic live trending feed & local library data
     const loadHomeData = async () => {
       try {
-        const [tracksRes, albumsRes, playlistsRes, searchRes] = await Promise.all([
-          fetch('/api/tracks?limit=20'),
-          fetch('/api/albums'),
-          fetch('/api/playlists'),
-          fetch('/api/search?q='),
+        const [trendingRes, tracksRes, albumsRes, playlistsRes] = await Promise.all([
+          fetch('/api/trending').catch(() => null),
+          fetch('/api/tracks?limit=20').catch(() => null),
+          fetch('/api/albums').catch(() => null),
+          fetch('/api/playlists').catch(() => null),
         ]);
 
-        if (tracksRes.ok) {
+        if (trendingRes && trendingRes.ok) {
+          const trendingData = await trendingRes.json();
+          if (trendingData.spotlight) setSpotlightTracks(trendingData.spotlight);
+          if (trendingData.trendingAll) setTrendingAll(trendingData.trendingAll);
+          if (trendingData.malayalam) setMalayalamTrending(trendingData.malayalam);
+          if (trendingData.tamil) setTamilTrending(trendingData.tamil);
+          if (trendingData.hindi) setHindiTrending(trendingData.hindi);
+          if (trendingData.newAlbums) setNewAlbums(trendingData.newAlbums);
+        }
+
+        if (tracksRes && tracksRes.ok) {
           const data = await tracksRes.json();
           const all: TrackData[] = data.tracks || [];
-          setRecentTracks(all.slice(0, 6));
           setHiResTracks(all.filter((t) => t.assets?.some((a) => a.isHiRes)));
         }
 
-        if (albumsRes.ok) {
+        if (albumsRes && albumsRes.ok) {
           const data = await albumsRes.json();
-          setAlbums(data.albums || []);
+          setLocalAlbums(data.albums || []);
         }
 
-        if (playlistsRes.ok) {
+        if (playlistsRes && playlistsRes.ok) {
           const data = await playlistsRes.json();
           setPlaylists(data.playlists || []);
-        }
-
-        if (searchRes.ok) {
-          const data = await searchRes.json();
-          const indianProvider = data.results?.find((r: any) => r.providerCode === 'indian_music_vault');
-          if (indianProvider) {
-            setIndianTracks(indianProvider.tracks || []);
-            if (indianProvider.albums && indianProvider.albums.length > 0) {
-              setAlbums((prev) => {
-                const existingIds = new Set(prev.map((a) => a.id));
-                const newAlbums = (indianProvider.albums as AlbumSummary[]).filter(
-                  (a) => !existingIds.has(a.id)
-                );
-                return [...prev, ...newAlbums];
-              });
-            }
-          }
-
-          const openProvider = data.results?.find((r: any) => r.providerCode === 'open_licensed');
-          if (openProvider) {
-            setOpenTracks(openProvider.tracks || []);
-          }
-
-          const onlineProvider = data.results?.find((r: any) => r.providerCode === 'audius_online');
-          if (onlineProvider) {
-            setOnlineTrending(onlineProvider.tracks || []);
-          }
         }
       } catch (err) {
         console.error('Failed to load home catalogue:', err);
@@ -90,53 +113,339 @@ export default function HomePage() {
     };
 
     loadHomeData();
-  }, []);
+
+    return () => {
+      window.removeEventListener('imusic:recently_played_updated', handleRecentUpdate);
+    };
+  }, [refreshRecentlyPlayed]);
+
+  // Determine which trending tracks to display based on selected language
+  const activeTrendingTracks = useMemo(() => {
+    switch (selectedLanguage) {
+      case 'malayalam':
+        return malayalamTrending.length > 0 ? malayalamTrending : trendingAll;
+      case 'tamil':
+        return tamilTrending.length > 0 ? tamilTrending : trendingAll;
+      case 'hindi':
+        return hindiTrending.length > 0 ? hindiTrending : trendingAll;
+      case 'all':
+      default:
+        return trendingAll;
+    }
+  }, [selectedLanguage, malayalamTrending, tamilTrending, hindiTrending, trendingAll]);
+
+  // Combine new albums with local albums
+  const displayedAlbums = useMemo(() => {
+    const existingIds = new Set(newAlbums.map((a) => a.id));
+    const extra = localAlbums.filter((a) => !existingIds.has(a.id));
+    return [...newAlbums, ...extra];
+  }, [newAlbums, localAlbums]);
+
+  const handlePlayRecentlyPlayedAll = () => {
+    if (recentlyPlayed.length > 0) {
+      playTrack(recentlyPlayed[0], recentlyPlayed);
+    }
+  };
+
+  const handlePlayTrendingAll = () => {
+    if (activeTrendingTracks.length > 0) {
+      playTrack(activeTrendingTracks[0], activeTrendingTracks);
+    }
+  };
 
   const hasAnyContent =
-    recentTracks.length > 0 ||
-    albums.length > 0 ||
-    openTracks.length > 0 ||
-    onlineTrending.length > 0 ||
-    indianTracks.length > 0;
-
-  const filteredIndianTracks = indianTracks.filter((t) => {
-    if (selectedLanguage === 'all') return true;
-    const g = (t.genre || '').toLowerCase();
-    const lang = selectedLanguage.toLowerCase();
-    return g.includes(lang);
-  });
+    recentlyPlayed.length > 0 ||
+    activeTrendingTracks.length > 0 ||
+    displayedAlbums.length > 0 ||
+    hiResTracks.length > 0;
 
   return (
     <div className={styles.container}>
+      {/* Top Ambient Glow */}
+      <div className={styles.ambientTopGlow} />
+
       {/* Top Header */}
       <header className={styles.header}>
-        <div>
-          <span className={styles.subGreeting}>AVMusic • Hi-Res & Lossless PWA</span>
+        <div className={styles.greetingBlock}>
+          <div className={styles.subGreetingRow}>
+            <span className={styles.subGreetingBadge}>AVMusic Hi-Res Studio</span>
+            <div className={styles.liveIndicator}>
+              <span className={styles.liveDot} />
+              <span>LIVE CHARTS 2026</span>
+            </div>
+          </div>
           <h1 className={styles.greeting}>{greeting}</h1>
         </div>
+
         <div className={styles.headerActions}>
-          <Link href="/settings" className={styles.iconBtn} title="Theme & Audio Settings" aria-label="Settings">
+          <Link
+            href="/settings"
+            className={styles.iconBtn}
+            title="Theme & Audio Settings"
+            aria-label="Settings"
+          >
             <Settings size={20} />
           </Link>
-          <Link href="/import" className={styles.iconBtn} title="Import Music Files" aria-label="Import Music Files">
+          <Link
+            href="/import"
+            className={styles.iconBtn}
+            title="Import Music Files"
+            aria-label="Import Music Files"
+          >
             <UploadCloud size={20} />
           </Link>
         </div>
       </header>
 
-      {/* Top Dynamic Spotlight Aurora Hero */}
-      <HeroSpotlight />
+      {/* Top Dynamic Spotlight Aurora Hero (Auto-rotating 2026 Trending Hits) */}
+      <HeroSpotlight tracks={spotlightTracks} />
 
-      {/* Explore Soundscapes & Genres Grid */}
+      {/* =========================================================================
+          RECENTLY PLAYED SONGS (CARDS)
+          ========================================================================= */}
+      {recentlyPlayed.length > 0 ? (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <div className={`${styles.sectionIconWrapper} ${styles.iconCyan}`}>
+                  <History size={16} />
+                </div>
+                <h2 className={styles.sectionTitle}>Recently Played</h2>
+                <span className={`${styles.sectionBadge} ${styles.sectionBadgeRecent}`}>
+                  {recentlyPlayed.length} TRACKS
+                </span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Jump right back into your recent listening session
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className={styles.sectionActionBtn}
+              onClick={handlePlayRecentlyPlayedAll}
+              title="Play all recently played tracks"
+            >
+              <Play size={13} fill="currentColor" />
+              <span>Play All</span>
+            </button>
+          </div>
+
+          <div className={styles.horizontalScroll}>
+            {recentlyPlayed.map((track) => (
+              <TrackCard
+                key={`recent-${track.id}`}
+                track={track}
+                playlistContext={recentlyPlayed}
+              />
+            ))}
+          </div>
+        </section>
+      ) : trendingAll.length > 0 ? (
+        /* If no history yet, display Quick Picks for you */
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <div className={`${styles.sectionIconWrapper} ${styles.iconCyan}`}>
+                  <Headphones size={16} />
+                </div>
+                <h2 className={styles.sectionTitle}>Quick Picks For You</h2>
+                <span className={`${styles.sectionBadge} ${styles.sectionBadgeRecent}`}>
+                  RECOMMENDED
+                </span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Hand-picked hot singles to kickstart your queue
+              </span>
+            </div>
+          </div>
+
+          <div className={styles.horizontalScroll}>
+            {trendingAll.slice(0, 10).map((track) => (
+              <TrackCard
+                key={`quickpick-${track.id}`}
+                track={track}
+                playlistContext={trendingAll}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* =========================================================================
+          NEW RELEASES & SOUNDTRACK ALBUMS (2026)
+          ========================================================================= */}
+      {displayedAlbums.length > 0 && (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <div className={`${styles.sectionIconWrapper} ${styles.iconViolet}`}>
+                  <Film size={16} />
+                </div>
+                <h2 className={styles.sectionTitle}>New Releases &amp; Soundtracks</h2>
+                <span className={`${styles.sectionBadge} ${styles.sectionBadgeHires}`}>
+                  2026 OFFICIAL
+                </span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Latest movie albums &amp; master singles in Malayalam, Tamil &amp; Hindi
+              </span>
+            </div>
+          </div>
+
+          <div className={styles.horizontalScroll}>
+            {displayedAlbums.map((album) => (
+              <AlbumCard key={album.id} album={album} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* =========================================================================
+          TRENDING RELEASES (MALAYALAM, TAMIL, HINDI PRIORITIZED)
+          ========================================================================= */}
+      {activeTrendingTracks.length > 0 && (
+        <section className={styles.section}>
+          <div className={styles.sectionHeaderRow}>
+            <div>
+              <div className={styles.badgeRow}>
+                <div className={`${styles.sectionIconWrapper} ${styles.iconAmber}`}>
+                  <Flame size={16} />
+                </div>
+                <h2 className={styles.sectionTitle}>Trending Releases</h2>
+                <span className={`${styles.sectionBadge} ${styles.sectionBadgeTrending}`}>
+                  320 KBPS MASTER
+                </span>
+              </div>
+              <span className={styles.sectionSubtitle}>
+                Real-time chart toppers • Malayalam, Tamil &amp; Hindi prioritized
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className={styles.viewSwitcher}>
+                <button
+                  type="button"
+                  className={`${styles.viewSwitchBtn} ${viewMode === 'cards' ? styles.viewSwitchBtnActive : ''}`}
+                  onClick={() => setViewMode('cards')}
+                  title="Card View"
+                  aria-label="Card View"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.viewSwitchBtn} ${viewMode === 'list' ? styles.viewSwitchBtnActive : ''}`}
+                  onClick={() => setViewMode('list')}
+                  title="List View"
+                  aria-label="List View"
+                >
+                  <List size={15} />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className={styles.sectionActionBtn}
+                onClick={handlePlayTrendingAll}
+                title="Play all trending songs"
+              >
+                <Play size={13} fill="currentColor" />
+                <span>Play All</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Language filter pills with distinct vivid neon colors */}
+          <div className={styles.filterPillsRow}>
+            <button
+              type="button"
+              className={`${styles.filterPill} ${
+                selectedLanguage === 'all' ? styles.filterPillAllActive : ''
+              }`}
+              onClick={() => setSelectedLanguage('all')}
+            >
+              <Flame size={14} />
+              <span>All Trending</span>
+            </button>
+
+            <button
+              type="button"
+              className={`${styles.filterPill} ${
+                selectedLanguage === 'malayalam' ? styles.filterPillMalayalamActive : ''
+              }`}
+              onClick={() => setSelectedLanguage('malayalam')}
+            >
+              <span style={{ fontSize: 13 }}>🟢</span>
+              <span>Malayalam (മലയാളം)</span>
+            </button>
+
+            <button
+              type="button"
+              className={`${styles.filterPill} ${
+                selectedLanguage === 'tamil' ? styles.filterPillTamilActive : ''
+              }`}
+              onClick={() => setSelectedLanguage('tamil')}
+            >
+              <span style={{ fontSize: 13 }}>🟡</span>
+              <span>Tamil (தமிழ்)</span>
+            </button>
+
+            <button
+              type="button"
+              className={`${styles.filterPill} ${
+                selectedLanguage === 'hindi' ? styles.filterPillHindiActive : ''
+              }`}
+              onClick={() => setSelectedLanguage('hindi')}
+            >
+              <span style={{ fontSize: 13 }}>🔴</span>
+              <span>Hindi (हिन्दी)</span>
+            </button>
+          </div>
+
+          {/* Cards View vs List View */}
+          {viewMode === 'cards' ? (
+            <div className={styles.horizontalScroll}>
+              {activeTrendingTracks.slice(0, 16).map((track) => (
+                <TrackCard
+                  key={track.id}
+                  track={track}
+                  playlistContext={activeTrendingTracks}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={styles.trackList}>
+              {activeTrendingTracks.slice(0, 14).map((track, idx) => (
+                <TrackListItem
+                  key={track.id}
+                  track={track}
+                  index={idx}
+                  playlistContext={activeTrendingTracks}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* =========================================================================
+          EXPLORE SOUNDSCAPES & GENRES GRID
+          ========================================================================= */}
       <section className={styles.section}>
         <div className={styles.sectionHeaderRow}>
           <div>
             <div className={styles.badgeRow}>
-              <Compass size={18} className={styles.sectionIcon} />
+              <div className={`${styles.sectionIconWrapper} ${styles.iconEmerald}`}>
+                <Compass size={16} />
+              </div>
               <h2 className={styles.sectionTitle}>Explore Soundscapes</h2>
             </div>
             <span className={styles.sectionSubtitle}>
-              Curated charts across cinema, retro gold & studio lossless masters
+              Curated charts across cinema, retro gold &amp; studio lossless masters
             </span>
           </div>
         </div>
@@ -146,111 +455,26 @@ export default function HomePage() {
             if (val === 'hires') {
               const el = document.getElementById('hires-vault');
               if (el) el.scrollIntoView({ behavior: 'smooth' });
-              setSelectedLanguage('all');
             } else if (val === 'retro') {
               setSelectedLanguage('malayalam');
-            } else {
-              setSelectedLanguage(val as any);
+            } else if (val === 'malayalam' || val === 'tamil' || val === 'hindi' || val === 'all') {
+              setSelectedLanguage(val);
             }
           }}
         />
       </section>
 
-      {/* Featured Movie Soundtracks & Albums */}
-      {albums.length > 0 && (
-        <section className={styles.section}>
-          <div className={styles.sectionHeaderRow}>
-            <div>
-              <div className={styles.badgeRow}>
-                <Film size={18} className={styles.sectionIcon} />
-                <h2 className={styles.sectionTitle}>Featured Movie Soundtracks</h2>
-              </div>
-              <span className={styles.sectionSubtitle}>
-                Complete official soundtrack albums with full tracklists
-              </span>
-            </div>
-          </div>
-          <div className={styles.horizontalScroll}>
-            {albums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Top Trending Music Section */}
-      {indianTracks.length > 0 && (
-        <section className={styles.section}>
-          <div className={styles.sectionHeaderRow}>
-            <div>
-              <div className={styles.badgeRow}>
-                <h2 className={styles.sectionTitle}>Trending Releases</h2>
-                <span className={styles.sectionBadge}>320 KBPS</span>
-              </div>
-              <span className={styles.sectionSubtitle}>
-                Instant playback across Tamil, Malayalam, Hindi & Global charts
-              </span>
-            </div>
-          </div>
-
-          {/* Language filter pills */}
-          <div className={styles.horizontalScroll}>
-            <button
-              type="button"
-              className={`${styles.filterPill} ${selectedLanguage === 'all' ? styles.filterPillActive : ''}`}
-              onClick={() => setSelectedLanguage('all')}
-            >
-              All Releases
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterPill} ${selectedLanguage === 'tamil' ? styles.filterPillActive : ''}`}
-              onClick={() => setSelectedLanguage('tamil')}
-            >
-              Tamil (தமிழ்)
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterPill} ${selectedLanguage === 'malayalam' ? styles.filterPillActive : ''}`}
-              onClick={() => setSelectedLanguage('malayalam')}
-            >
-              Malayalam (മലയാളം)
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterPill} ${selectedLanguage === 'hindi' ? styles.filterPillActive : ''}`}
-              onClick={() => setSelectedLanguage('hindi')}
-            >
-              Hindi (हिन्दी)
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterPill} ${selectedLanguage === 'global' ? styles.filterPillActive : ''}`}
-              onClick={() => setSelectedLanguage('global')}
-            >
-              Global (English)
-            </button>
-          </div>
-
-          <div className={styles.trackList}>
-            {(filteredIndianTracks.length > 0 ? filteredIndianTracks : indianTracks)
-              .slice(0, 10)
-              .map((track, idx) => (
-                <TrackListItem
-                  key={track.id}
-                  track={track}
-                  index={idx}
-                  playlistContext={filteredIndianTracks.length > 0 ? filteredIndianTracks : indianTracks}
-                />
-              ))}
-          </div>
-        </section>
-      )}
-
       {/* Quick Playlists Bar */}
       {playlists.length > 0 && (
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Your Playlists</h2>
+          <div className={styles.sectionHeaderRow}>
+            <div className={styles.badgeRow}>
+              <div className={`${styles.sectionIconWrapper} ${styles.iconViolet}`}>
+                <Library size={16} />
+              </div>
+              <h2 className={styles.sectionTitle}>Your Playlists</h2>
+            </div>
+          </div>
           <div className={styles.horizontalScroll}>
             {playlists.map((pl) => (
               <Link key={pl.id} href={`/playlists/${pl.id}`} className={styles.playlistPill}>
@@ -264,17 +488,22 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Recently Added Hi-Res Tracks */}
+      {/* Recently Added Hi-Res Tracks (if any) */}
       {hiResTracks.length > 0 && (
         <section className={styles.section} id="hires-vault">
           <div className={styles.sectionHeaderRow}>
             <div className={styles.badgeRow}>
+              <div className={`${styles.sectionIconWrapper} ${styles.iconAmber}`}>
+                <Sparkles size={16} />
+              </div>
               <h2 className={styles.sectionTitle}>Hi-Res Lossless Vault</h2>
-              <span className={styles.sectionBadge}>24-BIT / 96kHz</span>
+              <span className={`${styles.sectionBadge} ${styles.sectionBadgeHires}`}>
+                24-BIT / 96kHz
+              </span>
             </div>
           </div>
           <div className={styles.trackList}>
-            {hiResTracks.slice(0, 4).map((track, idx) => (
+            {hiResTracks.slice(0, 6).map((track, idx) => (
               <TrackListItem
                 key={track.id}
                 track={track}
@@ -286,82 +515,13 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Recently Added Library Tracks */}
-      {recentTracks.length > 0 && (
-        <section className={styles.section}>
-          <div className={styles.sectionHeaderRow}>
-            <h2 className={styles.sectionTitle}>Recently Added to Library</h2>
-            <Link href="/library" className={styles.seeAll}>See All</Link>
-          </div>
-          <div className={styles.trackList}>
-            {recentTracks.map((track, idx) => (
-              <TrackListItem
-                key={track.id}
-                track={track}
-                index={idx}
-                playlistContext={recentTracks}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Open-Licensed CC Audio Section */}
-      {openTracks.length > 0 && (
-        <section className={styles.section}>
-          <div className={styles.sectionHeaderRow}>
-            <div>
-              <h2 className={styles.sectionTitle}>Audiophile Acoustic Masters</h2>
-              <span className={styles.sectionSubtitle}>Studio master recordings with lossless depth</span>
-            </div>
-          </div>
-          <div className={styles.trackList}>
-            {openTracks.map((track, idx) => (
-              <TrackListItem
-                key={track.id}
-                track={track}
-                index={idx}
-                playlistContext={openTracks}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Live Online Free Music Section */}
-      {onlineTrending.length > 0 && (
-        <section className={styles.section}>
-          <div className={styles.sectionHeaderRow}>
-            <div>
-              <div className={styles.badgeRow}>
-                <h2 className={styles.sectionTitle}>Online Free Vault</h2>
-                <span className={styles.sectionBadge}>LOSSLESS STREAM</span>
-              </div>
-              <span className={styles.sectionSubtitle}>
-                Global indie & electronic releases
-              </span>
-            </div>
-          </div>
-          <div className={styles.trackList}>
-            {onlineTrending.slice(0, 6).map((track, idx) => (
-              <TrackListItem
-                key={track.id}
-                track={track}
-                index={idx}
-                playlistContext={onlineTrending}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Empty State if completely blank */}
+      {/* Empty State if completely blank and done loading */}
       {!loading && !hasAnyContent && (
         <div className={styles.emptyState}>
           <Disc size={48} className={styles.emptyIcon} />
           <h2>Your Audio Vault is Empty</h2>
           <p>Import your own lossless FLAC files or stream authorized online tracks.</p>
-          <div className={styles.emptyActions}>
+          <div style={{ marginTop: 8 }}>
             <Link href="/import" className={styles.primaryBtn}>
               <UploadCloud size={18} /> Ingest FLAC / Audio Files
             </Link>
@@ -371,7 +531,7 @@ export default function HomePage() {
 
       {/* SEO & Discoverability Footer for Crawlers & Users */}
       <footer className={styles.seoFooter}>
-        <h2 className={styles.seoFooterTitle}>AVMusic — Lossless & Hi-Res Music Streaming</h2>
+        <h2 className={styles.seoFooterTitle}>AVMusic — Lossless &amp; Hi-Res Music Streaming</h2>
         <p className={styles.seoFooterDesc}>
           AVMusic is an ad-free Progressive Web App designed for audiophile bit-perfect sound. Stream your favorite songs in 320 kbps &amp; FLAC, import playlists directly from Spotify or YouTube, and enjoy seamless background playback with lockscreen controls on iPhone, Android, and Desktop.
         </p>

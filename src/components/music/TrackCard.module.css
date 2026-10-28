@@ -1,0 +1,255 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 172px;
+  min-width: 172px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(22, 22, 30, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5),
+              0 0 24px -10px var(--card-glow, rgba(124, 58, 237, 0.25));
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.28s ease,
+              background 0.28s ease;
+  user-select: none;
+  overflow: hidden;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  background: rgba(30, 30, 42, 0.85);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 18px 40px -8px rgba(0, 0, 0, 0.7),
+              0 0 35px -6px var(--card-glow, rgba(124, 58, 237, 0.45));
+}
+
+.cardPlaying {
+  border-color: var(--accent-hover, #a855f7) !important;
+  box-shadow: 0 14px 36px -8px rgba(0, 0, 0, 0.6),
+              0 0 30px var(--accent-glow, rgba(168, 85, 247, 0.4)) !important;
+}
+
+/* Ambient artwork reflection overlay */
+.artWrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-surface-3, #1e1e2d);
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.6);
+}
+
+.artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.35s ease;
+}
+
+.card:hover .artwork {
+  transform: scale(1.06);
+}
+
+/* Language & Quality Badge Pills */
+.badgePill {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.badgeMalayalam {
+  background: rgba(16, 185, 129, 0.35);
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.badgeTamil {
+  background: rgba(245, 158, 11, 0.35);
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  color: #fde68a;
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.badgeHindi {
+  background: rgba(244, 63, 94, 0.35);
+  border: 1px solid rgba(251, 113, 133, 0.5);
+  color: #fecdd3;
+  text-shadow: 0 0 10px rgba(244, 63, 94, 0.5);
+}
+
+.badgeDefault {
+  background: rgba(124, 58, 237, 0.35);
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  color: #e9d5ff;
+  text-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
+}
+
+/* Play Overlay Button */
+.playOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.22s ease, background 0.22s ease;
+  z-index: 3;
+}
+
+.card:hover .playOverlay,
+.cardPlaying .playOverlay {
+  opacity: 1;
+}
+
+.playBtnCircle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ffffff 40%, #e2e8f0 100%);
+  color: #09090b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 20px var(--card-glow, rgba(168, 85, 247, 0.7));
+  transform: scale(0.85);
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.card:hover .playBtnCircle {
+  transform: scale(1.05);
+}
+
+/* Animated Equalizer Wave when playing */
+.equalizerWave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+
+.eqBar {
+  width: 3.5px;
+  background: var(--accent-hover, #c084fc);
+  border-radius: 2px;
+  animation: eqPulse 0.9s ease-in-out infinite alternate;
+}
+
+.eqBar:nth-child(1) { height: 40%; animation-delay: 0.1s; }
+.eqBar:nth-child(2) { height: 100%; animation-delay: 0.35s; }
+.eqBar:nth-child(3) { height: 65%; animation-delay: 0.2s; }
+.eqBar:nth-child(4) { height: 85%; animation-delay: 0.45s; }
+
+@keyframes eqPulse {
+  0% { height: 25%; }
+  100% { height: 100%; }
+}
+
+/* Track Metadata Info */
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+  flex: 1;
+}
+
+.artist {
+  font-size: 11.5px;
+  color: var(--text-secondary, #94a3b8);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-tertiary, #64748b);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.bitrateTag {
+  color: #38bdf8;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.favIconBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary, #64748b);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 50%;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.favIconBtn:hover {
+  color: #f43f5e;
+  transform: scale(1.15);
+}
+
+.favActive {
+  color: #f43f5e !important;
+}
+
+/* Responsive adjustments */
+@media (min-width: 1024px) {
+  .card {
+    width: 188px;
+    min-width: 188px;
+    padding: 14px;
+  }
+
+  .title {
+    font-size: 14.5px;
+  }
+
+  .artist {
+    font-size: 12.5px;
+  }
+}

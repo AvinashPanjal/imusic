@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { TrackData, PlaybackState, RepeatMode } from '@/types/music';
+import { LocalLibrary } from '@/lib/storage/localLibrary';
 
 const STORAGE_KEY = 'imusic_playback_state_v1';
 
@@ -100,6 +101,12 @@ export const usePlayerStore = create<PlaybackState>((set, get) => {
         repeatMode: get().repeatMode,
         shuffle: get().shuffle,
       });
+
+      try {
+        LocalLibrary.addRecentlyPlayed(track);
+      } catch (e) {
+        console.warn('Failed recording recently played track:', e);
+      }
     },
 
     togglePlay: () => {

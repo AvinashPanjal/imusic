@@ -2,6 +2,7 @@ import { PlaylistData, TrackData } from '@/types/music';
 
 const PLAYLISTS_KEY = 'imusic_local_playlists';
 const FAVORITES_KEY = 'imusic_local_favorites';
+const RECENTLY_PLAYED_KEY = 'imusic_recently_played_tracks';
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
@@ -154,6 +155,48 @@ export const LocalLibrary = {
     } catch (e) {
       console.warn('Failed to toggle local favorite:', e);
       return false;
+    }
+  },
+
+  // --- RECENTLY PLAYED ---
+  getRecentlyPlayed(): TrackData[] {
+    if (!isBrowser()) return [];
+    try {
+      const data = localStorage.getItem(RECENTLY_PLAYED_KEY);
+      if (!data) return [];
+      return JSON.parse(data);
+    } catch (e) {
+      console.warn('Failed to parse recently played:', e);
+      return [];
+    }
+  },
+
+  addRecentlyPlayed(track: TrackData): void {
+    if (!isBrowser() || !track || !track.id) return;
+    try {
+      const list = this.getRecentlyPlayed();
+      const filtered = list.filter((t) => t.id !== track.id);
+      filtered.unshift(track);
+      // Keep up to 30 recent tracks
+      const trimmed = filtered.slice(0, 30);
+      localStorage.setItem(RECENTLY_PLAYED_KEY, JSON.stringify(trimmed));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('imusic:recently_played_updated'));
+      }
+    } catch (e) {
+      console.warn('Failed to save recently played track:', e);
+    }
+  },
+
+  clearRecentlyPlayed(): void {
+    if (!isBrowser()) return;
+    try {
+      localStorage.removeItem(RECENTLY_PLAYED_KEY);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('imusic:recently_played_updated'));
+      }
+    } catch (e) {
+      console.warn('Failed to clear recently played:', e);
     }
   },
 };
