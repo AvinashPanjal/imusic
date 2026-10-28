@@ -110,12 +110,6 @@ export const TrackCard: React.FC<TrackCardProps> = ({
           onError={() => setImgSrc('/icons/default-artwork.png')}
         />
 
-        {showLanguageBadge && langLabel && (
-          <div className={`${styles.badgePill} ${badgeClass}`}>
-            {langLabel}
-          </div>
-        )}
-
         {/* Hover / Active Play Button Overlay */}
         <div className={styles.playOverlay}>
           <div className={styles.playBtnCircle}>

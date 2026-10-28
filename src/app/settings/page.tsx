@@ -14,13 +14,24 @@ import {
   Share,
   PlusSquare,
   Palette,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { OfflineDownloadManager } from '@/lib/offline/downloadManager';
-import { THEMES, getStoredTheme, applyTheme, type ThemeId } from '@/lib/theme';
+import {
+  THEMES,
+  getStoredTheme,
+  applyTheme,
+  getStoredColorMode,
+  applyColorMode,
+  type ThemeId,
+  type ColorMode,
+} from '@/lib/theme';
 import styles from './settings.module.css';
 
 export default function SettingsPage() {
   const [currentTheme, setCurrentTheme] = useState<ThemeId>('violet');
+  const [colorMode, setColorMode] = useState<ColorMode>('dark');
   const [streamingQuality, setStreamingQuality] = useState('auto');
   const [wifiQuality, setWifiQuality] = useState('hires');
   const [cellularQuality, setCellularQuality] = useState('high');
@@ -31,6 +42,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setCurrentTheme(getStoredTheme());
+    setColorMode(getStoredColorMode());
   }, []);
 
   useEffect(() => {
@@ -117,7 +129,38 @@ export default function SettingsPage() {
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <Palette size={18} className={styles.sectionIcon} />
-          <h2>App Appearance & Accent Themes</h2>
+          <h2>Appearance & Color Scheme</h2>
+        </div>
+
+        {/* Dark / Light Mode Switcher */}
+        <div className={styles.modeToggleRow}>
+          <button
+            type="button"
+            className={`${styles.modeCard} ${colorMode === 'dark' ? styles.modeCardActive : ''}`}
+            onClick={() => {
+              setColorMode('dark');
+              applyColorMode('dark');
+              setSavedNotice(true);
+              setTimeout(() => setSavedNotice(false), 2000);
+            }}
+          >
+            <Moon size={18} />
+            <span>Dark Mode</span>
+          </button>
+
+          <button
+            type="button"
+            className={`${styles.modeCard} ${colorMode === 'light' ? styles.modeCardActive : ''}`}
+            onClick={() => {
+              setColorMode('light');
+              applyColorMode('light');
+              setSavedNotice(true);
+              setTimeout(() => setSavedNotice(false), 2000);
+            }}
+          >
+            <Sun size={18} />
+            <span>White / Light Mode</span>
+          </button>
         </div>
 
         <div className={styles.themeGrid}>

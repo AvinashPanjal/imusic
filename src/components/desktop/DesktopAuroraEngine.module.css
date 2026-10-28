@@ -106,3 +106,15 @@
     transform: translate(50px, -20px) scale(0.96);
   }
 }
+
+:global([data-color-mode="light"]) .auroraOrb1,
+:global([data-color-mode="light"]) .auroraOrb2,
+:global([data-color-mode="light"]) .auroraOrb3 {
+  opacity: 0.35;
+  filter: blur(120px);
+}
+
+:global([data-color-mode="light"]) .subtleGridPattern {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  opacity: 0.6;
+}

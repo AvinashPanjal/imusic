@@ -73,6 +73,42 @@
   color: var(--text-primary);
 }
 
+.modeToggleRow {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.modeCard {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--bg-surface-2);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modeCard:hover {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+.modeCardActive {
+  background: var(--bg-surface-3);
+  border-color: var(--accent-hover);
+  color: var(--text-primary);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
 .themeGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

@@ -121,14 +121,11 @@ export const HeroSpotlight: React.FC<HeroSpotlightProps> = ({ tracks = [] }) => 
         <div className={styles.metaCol}>
           <div className={styles.tagRow}>
             <span className={styles.spotlightTag}>
-              <Radio size={12} className={styles.sparkleIcon} />
-              {hasDynamicTracks ? 'LIVE CHARTS 2026' : 'TODAY\'S SPOTLIGHT'}
+              <Sparkles size={12} className={styles.sparkleIcon} />
+              SPOTLIGHT
             </span>
             <span className={styles.hiresTag}>
               {genre}
-            </span>
-            <span className={styles.hiresTag}>
-              320 KBPS MASTER
             </span>
           </div>
 
@@ -140,7 +137,7 @@ export const HeroSpotlight: React.FC<HeroSpotlightProps> = ({ tracks = [] }) => 
 
           <p className={styles.description}>
             {dynamicTrack
-              ? 'Trending top release • High-fidelity lossless stereo stream'
+              ? 'Trending release • High-fidelity lossless stereo stream'
               : `Official Soundtrack Album • ${staticSoundtrack.totalTracks || 10} Tracks in 320 KBPS Studio Master`}
           </p>
 

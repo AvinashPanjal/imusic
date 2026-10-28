@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft,
@@ -10,9 +10,18 @@ import {
   Palette,
   Keyboard,
   Sparkles,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
-import { getStoredTheme, applyTheme, ThemeId } from '@/lib/theme';
+import {
+  getStoredTheme,
+  applyTheme,
+  getStoredColorMode,
+  toggleColorMode,
+  ThemeId,
+  ColorMode,
+} from '@/lib/theme';
 import styles from './DesktopHeader.module.css';
 
 interface DesktopHeaderProps {
@@ -29,15 +38,30 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
   isQueueOpen,
 }) => {
   const router = useRouter();
-  const { isPlaying, queue, currentTrack } = usePlayerStore();
+  const { isPlaying, queue } = usePlayerStore();
+  const [colorMode, setColorMode] = useState<ColorMode>('dark');
 
   const themes: ThemeId[] = ['violet', 'sunset', 'emerald', 'ocean', 'amber'];
+
+  useEffect(() => {
+    setColorMode(getStoredColorMode());
+    const handleModeChange = (e: any) => {
+      if (e.detail?.mode) setColorMode(e.detail.mode);
+    };
+    window.addEventListener('imusic:color_mode_changed', handleModeChange);
+    return () => window.removeEventListener('imusic:color_mode_changed', handleModeChange);
+  }, []);
 
   const cycleTheme = () => {
     const current = getStoredTheme();
     const idx = themes.indexOf(current);
     const nextTheme = themes[(idx + 1) % themes.length];
     applyTheme(nextTheme);
+  };
+
+  const handleToggleMode = () => {
+    const next = toggleColorMode();
+    setColorMode(next);
   };
 
   return (
@@ -67,13 +91,13 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
         <div className={styles.searchPill} onClick={onOpenSearch} role="searchbox" tabIndex={0}>
           <Search size={16} className={styles.searchIcon} />
           <span className={styles.searchPlaceholder}>
-            Search tracks, albums, YouTube covers...
+            Search tracks, albums, artists...
           </span>
           <kbd className={styles.kbd}>⌘K</kbd>
         </div>
       </div>
 
-      {/* Right: Audio spec, Theme switch, Queue toggle, Shortcuts */}
+      {/* Right: Audio spec, Light/Dark mode, Theme switch, Queue toggle, Shortcuts */}
       <div className={styles.rightGroup}>
         {/* Equalizer Live Indicator */}
         <div className={styles.eqBadge} title="Hi-Res Lossless Audio Engine Active">
@@ -98,16 +122,28 @@ export const DesktopHeader: React.FC<DesktopHeaderProps> = ({
           <span>Lossless Bit-Perfect</span>
         </div>
 
+        {/* Light / Dark Mode Toggle */}
+        <button
+          type="button"
+          className={styles.actionBtn}
+          onClick={handleToggleMode}
+          title={colorMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          aria-label="Toggle Color Scheme"
+        >
+          {colorMode === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          <span>{colorMode === 'dark' ? 'Light' : 'Dark'}</span>
+        </button>
+
         {/* Theme Cycler */}
         <button
           type="button"
           className={styles.actionBtn}
           onClick={cycleTheme}
-          title="Cycle Theme Gradient"
-          aria-label="Change Theme"
+          title="Cycle Accent Gradient"
+          aria-label="Change Accent Theme"
         >
           <span className={styles.themeColorDot} />
-          <span>Theme</span>
+          <span>Accent</span>
         </button>
 
         {/* Queue Drawer Button */}

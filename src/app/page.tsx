@@ -11,20 +11,20 @@ import { CategoryGrid } from '@/components/home/CategoryGrid';
 import { LocalLibrary } from '@/lib/storage/localLibrary';
 import { usePlayerStore } from '@/store/playerStore';
 import {
-  Sparkles,
+  getStoredColorMode,
+  toggleColorMode,
+  type ColorMode,
+} from '@/lib/theme';
+import {
   UploadCloud,
   Library,
   Disc,
-  Film,
   Settings,
-  Compass,
-  Flame,
-  History,
   Play,
   LayoutGrid,
   List,
-  Music2,
-  Headphones,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import styles from './page.module.css';
 
@@ -32,6 +32,7 @@ type LanguageFilter = 'all' | 'malayalam' | 'tamil' | 'hindi';
 
 export default function HomePage() {
   const [greeting, setGreeting] = useState('Good music');
+  const [colorMode, setColorMode] = useState<ColorMode>('dark');
   const [recentlyPlayed, setRecentlyPlayed] = useState<TrackData[]>([]);
   const [spotlightTracks, setSpotlightTracks] = useState<TrackData[]>([]);
   const [trendingAll, setTrendingAll] = useState<TrackData[]>([]);
@@ -60,6 +61,13 @@ export default function HomePage() {
     if (hour < 12) setGreeting('Good morning');
     else if (hour < 18) setGreeting('Good afternoon');
     else setGreeting('Good evening');
+
+    // Initial color mode load
+    setColorMode(getStoredColorMode());
+    const handleModeChange = (e: any) => {
+      if (e.detail?.mode) setColorMode(e.detail.mode);
+    };
+    window.addEventListener('imusic:color_mode_changed', handleModeChange);
 
     // Initial load of recently played
     refreshRecentlyPlayed();
@@ -116,8 +124,14 @@ export default function HomePage() {
 
     return () => {
       window.removeEventListener('imusic:recently_played_updated', handleRecentUpdate);
+      window.removeEventListener('imusic:color_mode_changed', handleModeChange);
     };
   }, [refreshRecentlyPlayed]);
+
+  const handleToggleColorMode = () => {
+    const next = toggleColorMode();
+    setColorMode(next);
+  };
 
   // Determine which trending tracks to display based on selected language
   const activeTrendingTracks = useMemo(() => {
@@ -161,43 +175,48 @@ export default function HomePage() {
 
   return (
     <div className={styles.container}>
-      {/* Top Ambient Glow */}
+      {/* Top Ambient Light Beam */}
       <div className={styles.ambientTopGlow} />
 
       {/* Top Header */}
       <header className={styles.header}>
         <div className={styles.greetingBlock}>
-          <div className={styles.subGreetingRow}>
-            <span className={styles.subGreetingBadge}>AVMusic Hi-Res Studio</span>
-            <div className={styles.liveIndicator}>
-              <span className={styles.liveDot} />
-              <span>LIVE CHARTS 2026</span>
-            </div>
-          </div>
           <h1 className={styles.greeting}>{greeting}</h1>
+          <span className={styles.subGreetingText}>Your personal lossless music sanctuary</span>
         </div>
 
         <div className={styles.headerActions}>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            onClick={handleToggleColorMode}
+            title={colorMode === 'dark' ? 'Switch to White / Light Mode' : 'Switch to Dark Mode'}
+            aria-label="Toggle Color Scheme"
+          >
+            {colorMode === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+
           <Link
             href="/settings"
             className={styles.iconBtn}
             title="Theme & Audio Settings"
             aria-label="Settings"
           >
-            <Settings size={20} />
+            <Settings size={19} />
           </Link>
+
           <Link
             href="/import"
             className={styles.iconBtn}
             title="Import Music Files"
             aria-label="Import Music Files"
           >
-            <UploadCloud size={20} />
+            <UploadCloud size={19} />
           </Link>
         </div>
       </header>
 
-      {/* Top Dynamic Spotlight Aurora Hero (Auto-rotating 2026 Trending Hits) */}
+      {/* Dynamic Spotlight Aurora Hero */}
       <HeroSpotlight tracks={spotlightTracks} />
 
       {/* =========================================================================
@@ -207,17 +226,9 @@ export default function HomePage() {
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <div className={styles.badgeRow}>
-                <div className={`${styles.sectionIconWrapper} ${styles.iconCyan}`}>
-                  <History size={16} />
-                </div>
-                <h2 className={styles.sectionTitle}>Recently Played</h2>
-                <span className={`${styles.sectionBadge} ${styles.sectionBadgeRecent}`}>
-                  {recentlyPlayed.length} TRACKS
-                </span>
-              </div>
+              <h2 className={styles.sectionTitle}>Recently Played</h2>
               <span className={styles.sectionSubtitle}>
-                Jump right back into your recent listening session
+                Continue where you left off
               </span>
             </div>
 
@@ -243,21 +254,13 @@ export default function HomePage() {
           </div>
         </section>
       ) : trendingAll.length > 0 ? (
-        /* If no history yet, display Quick Picks for you */
+        /* If no history yet, display Quick Picks */
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <div className={styles.badgeRow}>
-                <div className={`${styles.sectionIconWrapper} ${styles.iconCyan}`}>
-                  <Headphones size={16} />
-                </div>
-                <h2 className={styles.sectionTitle}>Quick Picks For You</h2>
-                <span className={`${styles.sectionBadge} ${styles.sectionBadgeRecent}`}>
-                  RECOMMENDED
-                </span>
-              </div>
+              <h2 className={styles.sectionTitle}>Quick Picks For You</h2>
               <span className={styles.sectionSubtitle}>
-                Hand-picked hot singles to kickstart your queue
+                Recommended songs to start listening
               </span>
             </div>
           </div>
@@ -275,23 +278,15 @@ export default function HomePage() {
       ) : null}
 
       {/* =========================================================================
-          NEW RELEASES & SOUNDTRACK ALBUMS (2026)
+          NEW RELEASES & SOUNDTRACK ALBUMS
           ========================================================================= */}
       {displayedAlbums.length > 0 && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <div className={styles.badgeRow}>
-                <div className={`${styles.sectionIconWrapper} ${styles.iconViolet}`}>
-                  <Film size={16} />
-                </div>
-                <h2 className={styles.sectionTitle}>New Releases &amp; Soundtracks</h2>
-                <span className={`${styles.sectionBadge} ${styles.sectionBadgeHires}`}>
-                  2026 OFFICIAL
-                </span>
-              </div>
+              <h2 className={styles.sectionTitle}>New Releases</h2>
               <span className={styles.sectionSubtitle}>
-                Latest movie albums &amp; master singles in Malayalam, Tamil &amp; Hindi
+                Latest official albums &amp; soundtracks in Malayalam, Tamil &amp; Hindi
               </span>
             </div>
           </div>
@@ -311,17 +306,9 @@ export default function HomePage() {
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <div className={styles.badgeRow}>
-                <div className={`${styles.sectionIconWrapper} ${styles.iconAmber}`}>
-                  <Flame size={16} />
-                </div>
-                <h2 className={styles.sectionTitle}>Trending Releases</h2>
-                <span className={`${styles.sectionBadge} ${styles.sectionBadgeTrending}`}>
-                  320 KBPS MASTER
-                </span>
-              </div>
+              <h2 className={styles.sectionTitle}>Trending Music</h2>
               <span className={styles.sectionSubtitle}>
-                Real-time chart toppers • Malayalam, Tamil &amp; Hindi prioritized
+                Popular across Malayalam, Tamil &amp; Hindi charts
               </span>
             </div>
 
@@ -359,7 +346,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Language filter pills with distinct vivid neon colors */}
+          {/* Clean, sleek language filter pills */}
           <div className={styles.filterPillsRow}>
             <button
               type="button"
@@ -368,8 +355,7 @@ export default function HomePage() {
               }`}
               onClick={() => setSelectedLanguage('all')}
             >
-              <Flame size={14} />
-              <span>All Trending</span>
+              All
             </button>
 
             <button
@@ -379,8 +365,7 @@ export default function HomePage() {
               }`}
               onClick={() => setSelectedLanguage('malayalam')}
             >
-              <span style={{ fontSize: 13 }}>🟢</span>
-              <span>Malayalam (മലയാളം)</span>
+              Malayalam
             </button>
 
             <button
@@ -390,8 +375,7 @@ export default function HomePage() {
               }`}
               onClick={() => setSelectedLanguage('tamil')}
             >
-              <span style={{ fontSize: 13 }}>🟡</span>
-              <span>Tamil (தமிழ்)</span>
+              Tamil
             </button>
 
             <button
@@ -401,8 +385,7 @@ export default function HomePage() {
               }`}
               onClick={() => setSelectedLanguage('hindi')}
             >
-              <span style={{ fontSize: 13 }}>🔴</span>
-              <span>Hindi (हिन्दी)</span>
+              Hindi
             </button>
           </div>
 
@@ -438,12 +421,7 @@ export default function HomePage() {
       <section className={styles.section}>
         <div className={styles.sectionHeaderRow}>
           <div>
-            <div className={styles.badgeRow}>
-              <div className={`${styles.sectionIconWrapper} ${styles.iconEmerald}`}>
-                <Compass size={16} />
-              </div>
-              <h2 className={styles.sectionTitle}>Explore Soundscapes</h2>
-            </div>
+            <h2 className={styles.sectionTitle}>Explore Soundscapes</h2>
             <span className={styles.sectionSubtitle}>
               Curated charts across cinema, retro gold &amp; studio lossless masters
             </span>
@@ -468,12 +446,7 @@ export default function HomePage() {
       {playlists.length > 0 && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
-            <div className={styles.badgeRow}>
-              <div className={`${styles.sectionIconWrapper} ${styles.iconViolet}`}>
-                <Library size={16} />
-              </div>
-              <h2 className={styles.sectionTitle}>Your Playlists</h2>
-            </div>
+            <h2 className={styles.sectionTitle}>Your Playlists</h2>
           </div>
           <div className={styles.horizontalScroll}>
             {playlists.map((pl) => (
@@ -492,15 +465,7 @@ export default function HomePage() {
       {hiResTracks.length > 0 && (
         <section className={styles.section} id="hires-vault">
           <div className={styles.sectionHeaderRow}>
-            <div className={styles.badgeRow}>
-              <div className={`${styles.sectionIconWrapper} ${styles.iconAmber}`}>
-                <Sparkles size={16} />
-              </div>
-              <h2 className={styles.sectionTitle}>Hi-Res Lossless Vault</h2>
-              <span className={`${styles.sectionBadge} ${styles.sectionBadgeHires}`}>
-                24-BIT / 96kHz
-              </span>
-            </div>
+            <h2 className={styles.sectionTitle}>Hi-Res Lossless Vault</h2>
           </div>
           <div className={styles.trackList}>
             {hiResTracks.slice(0, 6).map((track, idx) => (

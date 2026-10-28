@@ -222,6 +222,20 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="google-site-verification" content="8Ree6Iz36zQVrxXwJhwtVWdf_vdBPfXYSm0lkS6Ac0s" />
         <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var mode = localStorage.getItem('imusic_color_mode') || 'dark';
+                  document.documentElement.setAttribute('data-color-mode', mode);
+                  var theme = localStorage.getItem('imusic_active_theme') || 'violet';
+                  document.documentElement.setAttribute('data-theme', theme);
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+        <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />

@@ -1,12 +1,18 @@
-:root {
-  /* Surface & Background */
+:root, [data-color-mode="dark"] {
+  /* Surface & Background - Dark Studio Default */
   --bg-base: #09090b;
   --bg-surface-1: #131317;
   --bg-surface-2: #1b1b22;
   --bg-surface-3: #24242e;
   --bg-surface-4: #2e2e3a;
-  --bg-surface-elevated: rgba(27, 27, 34, 0.85);
+  --bg-surface-elevated: rgba(27, 27, 34, 0.88);
   --bg-overlay: rgba(0, 0, 0, 0.75);
+
+  --header-bg: rgba(14, 14, 18, 0.80);
+  --sidebar-bg: rgba(14, 14, 18, 0.90);
+  --dock-bg: rgba(14, 14, 18, 0.92);
+  --card-bg: rgba(22, 22, 30, 0.65);
+  --modal-bg: #121218;
 
   /* Brand / Electric Violet Accent */
   --accent-primary: #7c3aed;
@@ -72,6 +78,57 @@
   --transition-spring: 350ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+/* ==========================================================================
+   LIGHT MODE / WHITE MODE (Apple Music macOS Clean Aesthetic)
+   ========================================================================== */
+[data-color-mode="light"] {
+  /* Clean, Pure White Studio Palette */
+  --bg-base: #f8fafc;
+  --bg-surface-1: #ffffff;
+  --bg-surface-2: #f1f5f9;
+  --bg-surface-3: #e2e8f0;
+  --bg-surface-4: #cbd5e1;
+  --bg-surface-elevated: rgba(255, 255, 255, 0.94);
+  --bg-overlay: rgba(15, 23, 42, 0.4);
+
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --sidebar-bg: rgba(255, 255, 255, 0.94);
+  --dock-bg: rgba(255, 255, 255, 0.94);
+  --card-bg: rgba(255, 255, 255, 0.88);
+  --modal-bg: #ffffff;
+
+  /* Typography */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+  --text-accent: #7c3aed;
+
+  /* Audio Quality Badges */
+  --badge-hires-bg: rgba(217, 119, 6, 0.12);
+  --badge-hires-text: #b45309;
+  --badge-hires-border: rgba(217, 119, 6, 0.3);
+  --badge-lossless-bg: rgba(37, 99, 235, 0.12);
+  --badge-lossless-text: #1d4ed8;
+  --badge-lossless-border: rgba(37, 99, 235, 0.3);
+
+  /* Borders & Dividers */
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-medium: rgba(0, 0, 0, 0.14);
+  --border-focus: rgba(124, 58, 237, 0.5);
+
+  /* Status */
+  --status-error: #dc2626;
+  --status-success: #059669;
+  --status-warning: #d97706;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1);
+  --shadow-player: 0 -4px 24px rgba(0, 0, 0, 0.08);
+}
+
 /* Theme Variations */
 [data-theme="violet"], :root:not([data-theme]) {
   --accent-primary: #7c3aed;
@@ -81,6 +138,10 @@
   --accent-glow: rgba(124, 58, 237, 0.35);
   --text-accent: #a78bfa;
   --border-focus: rgba(139, 92, 246, 0.6);
+}
+
+[data-color-mode="light"][data-theme="violet"] {
+  --text-accent: #6d28d9;
 }
 
 [data-theme="sunset"] {
@@ -93,6 +154,10 @@
   --border-focus: rgba(251, 113, 133, 0.6);
 }
 
+[data-color-mode="light"][data-theme="sunset"] {
+  --text-accent: #e11d48;
+}
+
 [data-theme="emerald"] {
   --accent-primary: #10b981;
   --accent-hover: #34d399;
@@ -101,6 +166,10 @@
   --accent-glow: rgba(16, 185, 129, 0.35);
   --text-accent: #6ee7b7;
   --border-focus: rgba(52, 211, 153, 0.6);
+}
+
+[data-color-mode="light"][data-theme="emerald"] {
+  --text-accent: #059669;
 }
 
 [data-theme="ocean"] {
@@ -113,6 +182,10 @@
   --border-focus: rgba(56, 189, 248, 0.6);
 }
 
+[data-color-mode="light"][data-theme="ocean"] {
+  --text-accent: #0284c7;
+}
+
 [data-theme="amber"] {
   --accent-primary: #f59e0b;
   --accent-hover: #fbbf24;
@@ -121,4 +194,8 @@
   --accent-glow: rgba(245, 158, 11, 0.35);
   --text-accent: #fcd34d;
   --border-focus: rgba(251, 191, 36, 0.6);
+}
+
+[data-color-mode="light"][data-theme="amber"] {
+  --text-accent: #d97706;
 }
