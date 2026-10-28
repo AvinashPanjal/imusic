@@ -6,14 +6,14 @@
   max-width: 560px;
   margin: 0 auto;
   height: 58px;
-  background: rgba(18, 18, 24, 0.84);
+  background: var(--bg-surface-elevated, rgba(18, 18, 24, 0.88));
   backdrop-filter: blur(28px) saturate(190%);
   -webkit-backdrop-filter: blur(28px) saturate(190%);
   border-radius: var(--radius-xl);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-subtle);
   z-index: 90;
   cursor: pointer;
-  box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.75),
+  box-shadow: var(--shadow-player),
               0 0 24px -2px var(--mini-glow, rgba(124, 58, 237, 0.25));
   user-select: none;
   -webkit-user-select: none;
@@ -46,7 +46,7 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface-3);
   overflow: hidden;
 }
 

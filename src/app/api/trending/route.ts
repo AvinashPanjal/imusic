@@ -12,6 +12,7 @@ interface CachedFeed {
   timestamp: number;
   data: {
     spotlight: TrackData[];
+    dailyNewReleases: TrackData[];
     trendingAll: TrackData[];
     malayalam: TrackData[];
     tamil: TrackData[];
@@ -21,11 +22,11 @@ interface CachedFeed {
 }
 
 let cache: CachedFeed | null = null;
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache for fresh daily drops
 
 const SAAVN_API_BASE = 'https://www.jiosaavn.com/api.php';
 
-function formatSaavnSong(item: any, languageFallback = 'INDIAN'): TrackData | null {
+function formatSaavnSong(item: any, languageFallback = 'INDIAN'): (TrackData & { releaseDate?: string }) | null {
   if (!item || !item.id) return null;
 
   const encryptedMedia = item.encrypted_media_url || item.more_info?.encrypted_media_url;
@@ -43,7 +44,8 @@ function formatSaavnSong(item: any, languageFallback = 'INDIAN'): TrackData | nu
     ? rawCover.replace(/150x150\.jpg$/, '500x500.jpg').replace(/50x50\.jpg$/, '500x500.jpg')
     : '/icons/default-artwork.png';
 
-  const year = parseInt(item.year || item.more_info?.year, 10) || 2026;
+  const rawReleaseDate = item.release_date || item.more_info?.release_date || '';
+  const year = parseInt(item.year || item.more_info?.year || rawReleaseDate.slice(0, 4), 10) || 2026;
   const duration = parseInt(item.duration || item.more_info?.duration, 10) || 210;
   const lang = (item.language || languageFallback).toUpperCase();
 
@@ -83,6 +85,7 @@ function formatSaavnSong(item: any, languageFallback = 'INDIAN'): TrackData | nu
     ],
     streamUrl,
     providerCode: 'indian_music_vault',
+    releaseDate: rawReleaseDate,
   };
 }
 
@@ -112,18 +115,18 @@ function formatSaavnAlbum(item: any, languageFallback = 'INDIAN'): AlbumSummary 
   };
 }
 
-async function fetchPlaylistSongs(listid: string, langFallback: string): Promise<TrackData[]> {
+async function fetchPlaylistSongs(listid: string, langFallback: string): Promise<(TrackData & { releaseDate?: string })[]> {
   try {
     const url = `${SAAVN_API_BASE}?__call=playlist.getDetails&_format=json&_marker=0&cc=in&listid=${encodeURIComponent(
       listid
     )}`;
-    const res = await fetch(url, { headers: SAAVN_HEADERS, next: { revalidate: 600 } });
+    const res = await fetch(url, { headers: SAAVN_HEADERS, next: { revalidate: 300 } });
     if (!res.ok) return [];
     const json = await res.json().catch(() => ({}));
     const rawSongs = json.songs || [];
     return rawSongs
       .map((s: any) => formatSaavnSong(s, langFallback))
-      .filter((t: TrackData | null): t is TrackData => t !== null);
+      .filter((t: any): t is TrackData & { releaseDate?: string } => t !== null);
   } catch (err) {
     console.warn(`Failed fetching playlist ${listid}:`, err);
     return [];
@@ -135,7 +138,7 @@ async function fetchNewAlbums(query: string, langFallback: string): Promise<Albu
     const url = `${SAAVN_API_BASE}?__call=search.getAlbumResults&_format=json&_marker=0&cc=in&p=1&n=6&q=${encodeURIComponent(
       query
     )}`;
-    const res = await fetch(url, { headers: SAAVN_HEADERS, next: { revalidate: 600 } });
+    const res = await fetch(url, { headers: SAAVN_HEADERS, next: { revalidate: 300 } });
     if (!res.ok) return [];
     const json = await res.json().catch(() => ({}));
     const rawAlbums = json.results || [];
@@ -154,85 +157,129 @@ export async function GET(request: NextRequest) {
     if (cache && now - cache.timestamp < CACHE_TTL_MS) {
       return NextResponse.json(cache.data, {
         headers: {
-          'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200',
+          'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
         },
       });
     }
 
     // Parallel fetch:
-    // 1. Malayalam Superhits Top 50 (listid: 1134705865)
-    // 2. Tamil Trending (listid: 1268500351)
-    // 3. Hindi Superhits Top 50 (listid: 1134543272)
-    // 4. New 2026 albums in Malayalam, Tamil, Hindi
-    const [malayalamTracks, tamilTracks, hindiTracks, malNewAlbums, tamNewAlbums, hinNewAlbums] =
-      await Promise.all([
-        fetchPlaylistSongs('1134705865', 'Malayalam'),
-        fetchPlaylistSongs('1268500351', 'Tamil'),
-        fetchPlaylistSongs('1134543272', 'Hindi'),
-        fetchNewAlbums('Latest Malayalam Songs 2026', 'Malayalam'),
-        fetchNewAlbums('Latest Tamil Songs 2026', 'Tamil'),
-        fetchNewAlbums('Latest Hindi Songs 2026', 'Hindi'),
-      ]);
+    // 1. Official Daily New Releases:
+    //    - Hindi/All: "Taaza Tunes" (listid: 6689255)
+    //    - Tamil: "Pudhu Tunes" (listid: 10763385)
+    //    - Malayalam: "New Indie - Malayalam" (listid: 1219251930)
+    // 2. Official Superhits Top 50 Charts:
+    //    - Malayalam Top 50 (listid: 1134705865)
+    //    - Tamil Trending (listid: 1268500351)
+    //    - Hindi Top 50 (listid: 1134543272)
+    // 3. New 2026 Soundtrack Albums via Search
+    const [
+      dailyHindi,
+      dailyTamil,
+      dailyMalayalam,
+      malayalamChart,
+      tamilChart,
+      hindiChart,
+      malNewAlbums,
+      tamNewAlbums,
+      hinNewAlbums,
+    ] = await Promise.all([
+      fetchPlaylistSongs('6689255', 'Hindi'),
+      fetchPlaylistSongs('10763385', 'Tamil'),
+      fetchPlaylistSongs('1219251930', 'Malayalam'),
+      fetchPlaylistSongs('1134705865', 'Malayalam'),
+      fetchPlaylistSongs('1268500351', 'Tamil'),
+      fetchPlaylistSongs('1134543272', 'Hindi'),
+      fetchNewAlbums('Latest Malayalam Songs 2026', 'Malayalam'),
+      fetchNewAlbums('Latest Tamil Songs 2026', 'Tamil'),
+      fetchNewAlbums('Latest Hindi Songs 2026', 'Hindi'),
+    ]);
 
-    // Deduplicate and combine new albums (prioritizing Malayalam, Tamil, Hindi 2026 releases)
-    const seenAlbumIds = new Set<string>();
-    const combinedAlbums: AlbumSummary[] = [];
-    const maxAlbums = Math.max(malNewAlbums.length, tamNewAlbums.length, hinNewAlbums.length);
+    // 1. Compile Day-by-Day New Releases:
+    // Combine daily feeds with Malayalam, Tamil, Hindi prioritization and sort by release date
+    const allDaily = [...dailyMalayalam, ...dailyTamil, ...dailyHindi];
+    allDaily.sort((a, b) => {
+      const dateA = a.releaseDate || '2026-01-01';
+      const dateB = b.releaseDate || '2026-01-01';
+      return dateB.localeCompare(dateA);
+    });
 
-    for (let i = 0; i < maxAlbums; i++) {
-      if (malNewAlbums[i] && !seenAlbumIds.has(malNewAlbums[i].id)) {
-        seenAlbumIds.add(malNewAlbums[i].id);
-        combinedAlbums.push(malNewAlbums[i]);
-      }
-      if (tamNewAlbums[i] && !seenAlbumIds.has(tamNewAlbums[i].id)) {
-        seenAlbumIds.add(tamNewAlbums[i].id);
-        combinedAlbums.push(tamNewAlbums[i]);
-      }
-      if (hinNewAlbums[i] && !seenAlbumIds.has(hinNewAlbums[i].id)) {
-        seenAlbumIds.add(hinNewAlbums[i].id);
-        combinedAlbums.push(hinNewAlbums[i]);
+    const seenDailyIds = new Set<string>();
+    const dailyNewReleases: TrackData[] = [];
+    for (const t of allDaily) {
+      if (!seenDailyIds.has(t.id)) {
+        seenDailyIds.add(t.id);
+        dailyNewReleases.push(t);
       }
     }
 
-    // Interleave trending tracks with priority: Malayalam #1, Tamil #2, Hindi #3
+    // 2. Extract AlbumSummaries directly from the freshest daily new releases
+    const dynamicAlbumsFromDaily: AlbumSummary[] = [];
+    const seenDynamicAlbumIds = new Set<string>();
+    for (const track of dailyNewReleases) {
+      if (track.album && !seenDynamicAlbumIds.has(track.album.id)) {
+        seenDynamicAlbumIds.add(track.album.id);
+        dynamicAlbumsFromDaily.push({
+          id: track.album.id,
+          title: track.album.title,
+          coverImage: track.album.coverImage,
+          artistName: track.album.artistName || track.artists?.[0]?.name || 'Various Artists',
+          releaseYear: track.album.releaseYear || 2026,
+          genre: track.genre || 'Soundtrack',
+          isHiRes: false,
+          isLossless: true,
+        });
+      }
+    }
+
+    // Merge dynamic daily albums with searched albums
+    const combinedAlbums: AlbumSummary[] = [];
+    const seenAllAlbumIds = new Set<string>();
+
+    for (const album of [...dynamicAlbumsFromDaily, ...malNewAlbums, ...tamNewAlbums, ...hinNewAlbums]) {
+      if (!seenAllAlbumIds.has(album.id)) {
+        seenAllAlbumIds.add(album.id);
+        combinedAlbums.push(album);
+      }
+    }
+
+    // 3. Compile Top Trending Releases:
+    // Interleave Malayalam (#1), Tamil (#2), Hindi (#3)
     const seenTrackIds = new Set<string>();
     const trendingAll: TrackData[] = [];
-    const maxTracks = Math.max(malayalamTracks.length, tamilTracks.length, hindiTracks.length);
+    const maxTracks = Math.max(malayalamChart.length, tamilChart.length, hindiChart.length);
 
     for (let i = 0; i < maxTracks; i++) {
-      // Malayalam prioritized first
-      if (malayalamTracks[i] && !seenTrackIds.has(malayalamTracks[i].id)) {
-        seenTrackIds.add(malayalamTracks[i].id);
-        trendingAll.push(malayalamTracks[i]);
+      if (malayalamChart[i] && !seenTrackIds.has(malayalamChart[i].id)) {
+        seenTrackIds.add(malayalamChart[i].id);
+        trendingAll.push(malayalamChart[i]);
       }
-      // Tamil prioritized second
-      if (tamilTracks[i] && !seenTrackIds.has(tamilTracks[i].id)) {
-        seenTrackIds.add(tamilTracks[i].id);
-        trendingAll.push(tamilTracks[i]);
+      if (tamilChart[i] && !seenTrackIds.has(tamilChart[i].id)) {
+        seenTrackIds.add(tamilChart[i].id);
+        trendingAll.push(tamilChart[i]);
       }
-      // Hindi prioritized third
-      if (hindiTracks[i] && !seenTrackIds.has(hindiTracks[i].id)) {
-        seenTrackIds.add(hindiTracks[i].id);
-        trendingAll.push(hindiTracks[i]);
+      if (hindiChart[i] && !seenTrackIds.has(hindiChart[i].id)) {
+        seenTrackIds.add(hindiChart[i].id);
+        trendingAll.push(hindiChart[i]);
       }
     }
 
-    // Spotlight songs (top 6 hottest tracks from Malayalam, Tamil, Hindi)
+    // 4. Spotlight tracks: Top daily & chart hits
     const spotlight: TrackData[] = [];
-    if (malayalamTracks[0]) spotlight.push(malayalamTracks[0]);
-    if (tamilTracks[0]) spotlight.push(tamilTracks[0]);
-    if (hindiTracks[0]) spotlight.push(hindiTracks[0]);
-    if (malayalamTracks[1]) spotlight.push(malayalamTracks[1]);
-    if (tamilTracks[1]) spotlight.push(tamilTracks[1]);
-    if (hindiTracks[1]) spotlight.push(hindiTracks[1]);
+    if (dailyMalayalam[0]) spotlight.push(dailyMalayalam[0]);
+    if (dailyTamil[0]) spotlight.push(dailyTamil[0]);
+    if (dailyHindi[0]) spotlight.push(dailyHindi[0]);
+    if (malayalamChart[0]) spotlight.push(malayalamChart[0]);
+    if (tamilChart[0]) spotlight.push(tamilChart[0]);
+    if (hindiChart[0]) spotlight.push(hindiChart[0]);
 
     const feedData = {
       spotlight,
-      trendingAll: trendingAll.slice(0, 40),
-      malayalam: malayalamTracks.slice(0, 30),
-      tamil: tamilTracks.slice(0, 30),
-      hindi: hindiTracks.slice(0, 30),
-      newAlbums: combinedAlbums.slice(0, 16),
+      dailyNewReleases: dailyNewReleases.slice(0, 35),
+      trendingAll: trendingAll.slice(0, 45),
+      malayalam: [...dailyMalayalam, ...malayalamChart].slice(0, 30),
+      tamil: [...dailyTamil, ...tamilChart].slice(0, 30),
+      hindi: [...dailyHindi, ...hindiChart].slice(0, 30),
+      newAlbums: combinedAlbums.slice(0, 20),
     };
 
     cache = {
@@ -242,13 +289,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(feedData, {
       headers: {
-        'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200',
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
       },
     });
   } catch (error) {
     console.error('Trending feed error:', error);
 
-    // If cache exists even if stale, return it on failure
     if (cache) {
       return NextResponse.json(cache.data);
     }
@@ -256,6 +302,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         spotlight: [],
+        dailyNewReleases: [],
         trendingAll: [],
         malayalam: [],
         tamil: [],

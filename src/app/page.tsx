@@ -8,6 +8,7 @@ import { TrackCard } from '@/components/music/TrackCard';
 import { AlbumCard } from '@/components/music/AlbumCard';
 import { HeroSpotlight } from '@/components/home/HeroSpotlight';
 import { CategoryGrid } from '@/components/home/CategoryGrid';
+import { SmoothCarousel } from '@/components/common/SmoothCarousel';
 import { LocalLibrary } from '@/lib/storage/localLibrary';
 import { usePlayerStore } from '@/store/playerStore';
 import {
@@ -35,6 +36,7 @@ export default function HomePage() {
   const [colorMode, setColorMode] = useState<ColorMode>('dark');
   const [recentlyPlayed, setRecentlyPlayed] = useState<TrackData[]>([]);
   const [spotlightTracks, setSpotlightTracks] = useState<TrackData[]>([]);
+  const [dailyNewReleases, setDailyNewReleases] = useState<TrackData[]>([]);
   const [trendingAll, setTrendingAll] = useState<TrackData[]>([]);
   const [malayalamTrending, setMalayalamTrending] = useState<TrackData[]>([]);
   const [tamilTrending, setTamilTrending] = useState<TrackData[]>([]);
@@ -91,6 +93,7 @@ export default function HomePage() {
         if (trendingRes && trendingRes.ok) {
           const trendingData = await trendingRes.json();
           if (trendingData.spotlight) setSpotlightTracks(trendingData.spotlight);
+          if (trendingData.dailyNewReleases) setDailyNewReleases(trendingData.dailyNewReleases);
           if (trendingData.trendingAll) setTrendingAll(trendingData.trendingAll);
           if (trendingData.malayalam) setMalayalamTrending(trendingData.malayalam);
           if (trendingData.tamil) setTamilTrending(trendingData.tamil);
@@ -169,6 +172,7 @@ export default function HomePage() {
 
   const hasAnyContent =
     recentlyPlayed.length > 0 ||
+    dailyNewReleases.length > 0 ||
     activeTrendingTracks.length > 0 ||
     displayedAlbums.length > 0 ||
     hiResTracks.length > 0;
@@ -220,7 +224,7 @@ export default function HomePage() {
       <HeroSpotlight tracks={spotlightTracks} />
 
       {/* =========================================================================
-          RECENTLY PLAYED SONGS (CARDS)
+          RECENTLY PLAYED SONGS (SMOOTH CAROUSEL)
           ========================================================================= */}
       {recentlyPlayed.length > 0 ? (
         <section className={styles.section}>
@@ -243,7 +247,7 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className={styles.horizontalScroll}>
+          <SmoothCarousel>
             {recentlyPlayed.map((track) => (
               <TrackCard
                 key={`recent-${track.id}`}
@@ -251,7 +255,7 @@ export default function HomePage() {
                 playlistContext={recentlyPlayed}
               />
             ))}
-          </div>
+          </SmoothCarousel>
         </section>
       ) : trendingAll.length > 0 ? (
         /* If no history yet, display Quick Picks */
@@ -265,7 +269,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className={styles.horizontalScroll}>
+          <SmoothCarousel>
             {trendingAll.slice(0, 10).map((track) => (
               <TrackCard
                 key={`quickpick-${track.id}`}
@@ -273,29 +277,47 @@ export default function HomePage() {
                 playlistContext={trendingAll}
               />
             ))}
-          </div>
+          </SmoothCarousel>
         </section>
       ) : null}
 
       {/* =========================================================================
-          NEW RELEASES & SOUNDTRACK ALBUMS
+          NEW RELEASES & DAILY DROPS (SMOOTH CAROUSEL)
           ========================================================================= */}
-      {displayedAlbums.length > 0 && (
+      {(displayedAlbums.length > 0 || dailyNewReleases.length > 0) && (
         <section className={styles.section}>
           <div className={styles.sectionHeaderRow}>
             <div>
-              <h2 className={styles.sectionTitle}>New Releases</h2>
+              <h2 className={styles.sectionTitle}>New Releases &amp; Fresh Drops</h2>
               <span className={styles.sectionSubtitle}>
-                Latest official albums &amp; soundtracks in Malayalam, Tamil &amp; Hindi
+                Latest official albums &amp; singles updated day by day
               </span>
             </div>
           </div>
 
-          <div className={styles.horizontalScroll}>
-            {displayedAlbums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
-            ))}
-          </div>
+          {/* Soundtracks & Albums Carousel with Smooth Navigation */}
+          {displayedAlbums.length > 0 && (
+            <SmoothCarousel scrollStep={560}>
+              {displayedAlbums.map((album) => (
+                <AlbumCard key={album.id} album={album} />
+              ))}
+            </SmoothCarousel>
+          )}
+
+          {/* Day-by-Day Fresh Track Releases */}
+          {dailyNewReleases.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <SmoothCarousel scrollStep={560}>
+                {dailyNewReleases.slice(0, 20).map((track) => (
+                  <TrackCard
+                    key={`daily-${track.id}`}
+                    track={track}
+                    playlistContext={dailyNewReleases}
+                  />
+                ))}
+              </SmoothCarousel>
+            </div>
+          )}
         </section>
       )}
 
@@ -389,17 +411,17 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* Cards View vs List View */}
+          {/* Cards View with SmoothCarousel vs 2-Column List View */}
           {viewMode === 'cards' ? (
-            <div className={styles.horizontalScroll}>
-              {activeTrendingTracks.slice(0, 16).map((track) => (
+            <SmoothCarousel scrollStep={560}>
+              {activeTrendingTracks.slice(0, 20).map((track) => (
                 <TrackCard
                   key={track.id}
                   track={track}
                   playlistContext={activeTrendingTracks}
                 />
               ))}
-            </div>
+            </SmoothCarousel>
           ) : (
             <div className={styles.trackList}>
               {activeTrendingTracks.slice(0, 14).map((track, idx) => (
@@ -448,7 +470,7 @@ export default function HomePage() {
           <div className={styles.sectionHeaderRow}>
             <h2 className={styles.sectionTitle}>Your Playlists</h2>
           </div>
-          <div className={styles.horizontalScroll}>
+          <SmoothCarousel scrollStep={400}>
             {playlists.map((pl) => (
               <Link key={pl.id} href={`/playlists/${pl.id}`} className={styles.playlistPill}>
                 <div className={styles.playlistPillArt}>
@@ -457,7 +479,7 @@ export default function HomePage() {
                 <span className={styles.playlistPillTitle}>{pl.title}</span>
               </Link>
             ))}
-          </div>
+          </SmoothCarousel>
         </section>
       )}
 

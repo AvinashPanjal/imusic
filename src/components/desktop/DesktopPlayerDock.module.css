@@ -245,7 +245,7 @@
   position: relative;
   width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-surface-3);
   border-radius: var(--radius-full);
   overflow: visible;
   transition: height 150ms ease;
@@ -368,7 +368,7 @@
 .volumeTrack {
   width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--bg-surface-3);
   border-radius: var(--radius-full);
   position: relative;
   transition: height 150ms ease;
@@ -392,4 +392,48 @@
 @keyframes barDance {
   0% { transform: scaleY(0.25); }
   100% { transform: scaleY(1); }
+}
+
+:global([data-color-mode="light"]) .dock {
+  background: rgba(255, 255, 255, 0.94);
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.08);
+}
+
+:global([data-color-mode="light"]) .title {
+  color: var(--text-primary);
+}
+
+:global([data-color-mode="light"]) .scrubberTrack {
+  background: var(--bg-surface-3);
+}
+
+:global([data-color-mode="light"]) .scrubberThumb {
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 2px var(--accent-primary);
+}
+
+:global([data-color-mode="light"]) .volumeTrack {
+  background: var(--bg-surface-3);
+}
+
+:global([data-color-mode="light"]) .volumeFill {
+  background: var(--text-primary);
+}
+
+:global([data-color-mode="light"]) .iconBtn:hover,
+:global([data-color-mode="light"]) .controlBtn:hover {
+  background: var(--bg-surface-2);
+}
+
+:global([data-color-mode="light"]) .hoverTooltip {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-md);
+}
+
+:global([data-color-mode="light"]) .artworkWrapper {
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-sm);
 }
