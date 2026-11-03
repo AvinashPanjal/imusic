@@ -266,14 +266,19 @@ export function fuzzyMatch(source: string, target: string): boolean {
 export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtrack[] {
   if (!query || query.trim().length < 2) return [];
   const q = query.trim();
-  const qNorm = q.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanQ = q
+    .replace(/\b(songs?|movie|soundtrack|film|full|audio|video|mp3|lyrics|track|bgm|padam|pattu)\b/gi, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const effectiveQ = cleanQ && cleanQ.length >= 2 ? cleanQ : q;
+  const qNorm = effectiveQ.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  return FEATURED_SOUNDTRACKS.filter((st) => {
+  const matched = FEATURED_SOUNDTRACKS.filter((st) => {
     // 1. Direct album title or artist match
     if (
-      fuzzyMatch(st.title, q) ||
-      fuzzyMatch(st.artistName || '', q) ||
-      (st.genre && fuzzyMatch(st.genre, q))
+      fuzzyMatch(st.title, effectiveQ) ||
+      fuzzyMatch(st.artistName || '', effectiveQ) ||
+      (st.genre && fuzzyMatch(st.genre, effectiveQ))
     ) {
       return true;
     }
@@ -286,11 +291,27 @@ export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtra
           tNorm === qNorm ||
           tNorm.includes(qNorm) ||
           qNorm.includes(tNorm) ||
-          fuzzyMatch(trackName, q)
+          fuzzyMatch(trackName, effectiveQ)
         );
       });
     }
 
     return false;
+  });
+
+  // Sort matched: rank exact track / album title matches at the top
+  return matched.sort((a, b) => {
+    const aAlbumNorm = a.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const bAlbumNorm = b.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const aTrackExact = a.trackTitles?.some((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '') === qNorm);
+    const bTrackExact = b.trackTitles?.some((t) => t.toLowerCase().replace(/[^a-z0-9]/g, '') === qNorm);
+
+    if (aTrackExact && !bTrackExact) return -1;
+    if (!aTrackExact && bTrackExact) return 1;
+
+    if (aAlbumNorm === qNorm && bAlbumNorm !== qNorm) return -1;
+    if (aAlbumNorm !== qNorm && bAlbumNorm === qNorm) return 1;
+
+    return 0;
   });
 }

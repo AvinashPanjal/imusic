@@ -6,6 +6,8 @@
  * Tamil, Hindi, Telugu, etc.), and multi-query variant generation for 100% accurate search.
  */
 
+import { findMatchingFeaturedSoundtracks, fuzzyMatch } from '@/lib/constants/soundtracks';
+
 export interface AISearchAnalysis {
   originalQuery: string;
   correctedQuery: string;
@@ -20,7 +22,7 @@ export interface AISearchAnalysis {
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_CACHE_ENTRIES = 1200;
-const TIMEOUT_MS = 2200; // 2.2 seconds max timeout before fast fallback
+const TIMEOUT_MS = 6000; // 6 seconds timeout for Gemini API call
 
 interface CacheEntry {
   data: AISearchAnalysis;
@@ -32,7 +34,6 @@ const supervisorCache = new Map<string, CacheEntry>();
 const CANDIDATE_MODELS = [
   'gemini-flash-lite-latest',
   'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
 ];
 
 const SYSTEM_PROMPT = `You are the AI Music Search Supervisor for iMusic, an audio streaming app specializing in Indian (Malayalam, Tamil, Hindi, Telugu, Kannada) and Global music.
@@ -40,13 +41,26 @@ const SYSTEM_PROMPT = `You are the AI Music Search Supervisor for iMusic, an aud
 Analyze the user's music search query. Users frequently make typos, use casual transliteration (Manglish, Tanglish, Hinglish), or search by movie title instead of song title.
 
 Rules:
-1. Identify any typos or phonetic misspellings (e.g. "manjumel" -> "Manjummel Boys", "aveshm" -> "Aavesham", "bethleham kudba" -> "Bethlehem Kudumba Unit", "aniruth" -> "Anirudh", "illay illa" -> "Illey Illa").
-2. Extract the canonical "movieOrAlbum" name if the query refers to a film or soundtrack. Strip words like "songs", "movie", "padam", "pattu", "track".
-3. Extract "songName" if a specific track is requested (or null if searching for a whole movie/artist).
-4. Extract "primaryArtists" if singers or composers are mentioned or strongly associated (e.g., Sushin Shyam for Aavesham / Manjummel Boys).
-5. Specify "language" (Malayalam, Tamil, Hindi, Telugu, English, etc.).
-6. Generate 2-4 clean "searchVariants" optimized for music APIs (JioSaavn, YouTube, Spotify catalog searches).
-7. "correctedQuery": Clean, human-readable corrected title.
+1. Identify any typos or phonetic misspellings (e.g. "manjumel" -> "Manjummel Boys", "aveshm" -> "Aavesham", "bethleham kudba" -> "Bethlehem Kudumba Unit", "aniruth" -> "Anirudh", "illay illa" -> "Illey Illa", "chalya" -> "Chaleya").
+2. User Intent Classification (CRITICAL):
+   - "movie": When user searches for a movie title, film name, or movie soundtrack (e.g. "Manjummel Boys", "Aavesham", "Jailer", "Premalu", "Leo", "Devara", "Kalki", "Pushpa 2", "manjumel songs", "avesham movie", "drishyam", "premam"). In this case:
+     * intent MUST be "movie"
+     * "movieOrAlbum" is the canonical film title (e.g. "Manjummel Boys", "Aavesham")
+     * "songName" must be null (unless a single specific song was also explicitly named)
+     * The app will display the complete Movie Soundtrack Playlist at the very top.
+   - "song": When user searches for a specific individual song track (e.g. "Illuminati", "Kuthanthram", "Chaleya", "Jaada", "Illey Illa", "Hukum", "Mini Maharani", "Tum Hi Ho", "Arabic Kuthu"). In this case:
+     * intent MUST be "song"
+     * "songName" is the specific song name
+     * "movieOrAlbum" can be the parent movie if known, but intent remains "song"
+     * The app will prioritize this specific song track at the very top.
+   - "artist": When user searches for a music composer, singer, or director (e.g. "Anirudh", "Sushin Shyam", "A.R. Rahman", "Sid Sriram", "Shreya Ghoshal", "K.J. Yesudas").
+   - "genre" or "general": For generic moods, languages, or decades.
+3. Extract "movieOrAlbum" without filler words like "movie", "songs", "padam", "pattu", "soundtrack".
+4. Extract "songName" if and only if a specific song was requested.
+5. Extract "primaryArtists" (composers, singers).
+6. Specify "language" (Malayalam, Tamil, Hindi, Telugu, English, etc.).
+7. Generate 2-4 clean "searchVariants" optimized for JioSaavn and audio catalog search.
+8. "correctedQuery": Clean, human-readable corrected title.
 
 Return ONLY JSON:
 {
@@ -72,6 +86,51 @@ export async function superviseSearchQuery(rawQuery: string): Promise<AISearchAn
   const cached = supervisorCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     return cached.data;
+  }
+
+  // Check local curated Indian soundtracks for 0ms instant identification
+  const matchedSoundtracks = findMatchingFeaturedSoundtracks(query);
+  if (matchedSoundtracks.length > 0) {
+    const st = matchedSoundtracks[0];
+    const qNorm = query.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Check if the query specifically matched an individual song inside the album
+    const matchedTrack = st.trackTitles?.find((t) => {
+      const tNorm = t.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return tNorm === qNorm || tNorm.includes(qNorm) || qNorm.includes(tNorm) || fuzzyMatch(t, query);
+    });
+
+    if (matchedTrack && !fuzzyMatch(st.title, query)) {
+      // User specifically searched for a song!
+      const songAnalysis: AISearchAnalysis = {
+        originalQuery: query,
+        correctedQuery: matchedTrack,
+        intent: 'song',
+        movieOrAlbum: st.title,
+        songName: matchedTrack,
+        primaryArtists: st.artistName ? [st.artistName] : [],
+        language: st.genre?.split('/')[0]?.trim() || null,
+        searchVariants: [matchedTrack, `${matchedTrack} ${st.title}`, st.title],
+        isAiEnhanced: true,
+      };
+      supervisorCache.set(cacheKey, { data: songAnalysis, timestamp: Date.now() });
+      return songAnalysis;
+    }
+
+    // Otherwise, user searched for the movie/soundtrack album!
+    const movieAnalysis: AISearchAnalysis = {
+      originalQuery: query,
+      correctedQuery: st.title,
+      intent: 'movie',
+      movieOrAlbum: st.title,
+      songName: null,
+      primaryArtists: st.artistName ? [st.artistName] : [],
+      language: st.genre?.split('/')[0]?.trim() || null,
+      searchVariants: [st.title, `${st.title} songs`, `${st.title} soundtrack`],
+      isAiEnhanced: true,
+    };
+    supervisorCache.set(cacheKey, { data: movieAnalysis, timestamp: Date.now() });
+    return movieAnalysis;
   }
 
   const apiKey = process.env.GEMINI_API_KEY || '';

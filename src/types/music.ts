@@ -34,6 +34,7 @@ export interface AlbumSummary {
   genre?: string | null;
   isHiRes?: boolean;
   isLossless?: boolean;
+  tracks?: TrackData[];
 }
 
 export interface LyricLine {

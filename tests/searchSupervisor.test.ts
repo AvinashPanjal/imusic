@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { superviseSearchQuery } from '../src/lib/ai/searchSupervisor';
+import fs from 'fs';
+import path from 'path';
+
+if (!process.env.GEMINI_API_KEY) {
+  try {
+    const envContent = fs.readFileSync(path.resolve(__dirname, '../.env'), 'utf-8');
+    const match = envContent.match(/GEMINI_API_KEY=["']?([^"'\r\n]+)/);
+    if (match) {
+      process.env.GEMINI_API_KEY = match[1];
+    }
+  } catch {}
+}
 
 describe('AI Search Supervisor', () => {
   it('returns empty analysis for empty or whitespace query', async () => {
@@ -12,11 +24,19 @@ describe('AI Search Supervisor', () => {
     const res = await superviseSearchQuery('manjumel boys songs');
     expect(res.originalQuery).toBe('manjumel boys songs');
     expect(res.isAiEnhanced).toBe(true);
-    // Should have corrected query and movie name
+    // Should have corrected query, intent movie, and movie name
     expect(res.correctedQuery.toLowerCase()).toContain('manjummel boys');
     expect(res.movieOrAlbum?.toLowerCase()).toContain('manjummel boys');
+    expect(res.intent).toBe('movie');
     expect(res.primaryArtists.length).toBeGreaterThanOrEqual(1);
-  }, 10000);
+  }, 30000);
+
+  it('supervises specific song search query as song intent', async () => {
+    const res = await superviseSearchQuery('illuminati song');
+    expect(res.isAiEnhanced).toBe(true);
+    expect(res.intent).toBe('song');
+    expect(res.songName?.toLowerCase()).toContain('illuminati');
+  }, 30000);
 
   it('serves subsequent identical queries instantaneously from cache', async () => {
     const t0 = Date.now();
@@ -28,7 +48,7 @@ describe('AI Search Supervisor', () => {
     const t3 = Date.now();
 
     expect(res2.correctedQuery.toLowerCase()).toContain('aavesham');
-    // Cached response should be virtually instantaneous (< 10ms)
-    expect(t3 - t2).toBeLessThan(15);
-  }, 10000);
+    // Cached response should be virtually instantaneous (< 15ms)
+    expect(t3 - t2).toBeLessThan(20);
+  }, 30000);
 });

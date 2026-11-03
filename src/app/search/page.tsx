@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Search as SearchIcon, X, History, Film, Music2, User, Play, AlertCircle, Sparkles } from 'lucide-react';
+import { Search as SearchIcon, X, History, Film, Music2, User, Play, AlertCircle, Sparkles, Shuffle, Disc } from 'lucide-react';
 import { TrackData, AlbumSummary, ArtistSummary } from '@/types/music';
 import { TrackListItem } from '@/components/music/TrackListItem';
 import { AlbumCard } from '@/components/music/AlbumCard';
@@ -149,7 +149,7 @@ function computeRelevanceScore(
 
 export default function SearchPage() {
   const router = useRouter();
-  const { playTrack } = usePlayerStore();
+  const { playTrack, toggleShuffle } = usePlayerStore();
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -305,7 +305,36 @@ export default function SearchPage() {
   const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
   const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
 
-  const isMovieIntent = Boolean(aiInfo?.intent === 'movie' || aiInfo?.movieOrAlbum);
+  // Tracks belonging to the top movie soundtrack
+  const movieTracks = React.useMemo(() => {
+    if (!topAlbum) return [];
+    if (topAlbum.tracks && topAlbum.tracks.length > 0) {
+      return topAlbum.tracks;
+    }
+    const normTopAlbum = normalizeSearchText(topAlbum.title);
+    const matched = results.tracks.filter((t) => {
+      if (t.album?.id && topAlbum.id && t.album.id === topAlbum.id) return true;
+      if (t.album?.title) {
+        const normAlb = normalizeSearchText(t.album.title);
+        if (normAlb === normTopAlbum || normAlb.includes(normTopAlbum) || normTopAlbum.includes(normAlb)) {
+          return true;
+        }
+        if (fuzzyMatch(t.album.title, topAlbum.title)) return true;
+      }
+      return false;
+    });
+    return matched.length > 0 ? matched : results.tracks.slice(0, 8);
+  }, [topAlbum, results.tracks]);
+
+  const movieTrackIds = React.useMemo(() => new Set(movieTracks.map((t) => t.id)), [movieTracks]);
+  const otherTracks = React.useMemo(
+    () => results.tracks.filter((t) => !movieTrackIds.has(t.id)),
+    [results.tracks, movieTrackIds]
+  );
+  const otherAlbums = React.useMemo(
+    () => results.albums.filter((a) => a.id !== topAlbum?.id),
+    [results.albums, topAlbum]
+  );
 
   const trackScore = topTrack
     ? computeRelevanceScore(topTrack.title, topTrack.artists?.[0]?.name, debouncedQuery, topTrack.id.startsWith('saavn'), topTrack.album?.title, aiInfo)
@@ -319,43 +348,62 @@ export default function SearchPage() {
 
   // Check if query explicitly asks for a soundtrack, album, or movie
   const queryLower = debouncedQuery.toLowerCase();
-  const isExplicitAlbumSearch = isMovieIntent || /\b(soundtrack|album|movie|film|playlist|ost)\b/.test(queryLower);
+  const isExplicitAlbumSearch = /\b(soundtrack|album|movie|film|playlist|ost|padam|pattu)\b/.test(queryLower);
 
-  // If there is an exact or strong track match, Song ALWAYS wins Top Result (unless user searched specifically for a movie)
-  const isTopMatchAlbum = Boolean(
-    topAlbum &&
-      (!isTrackExact || (isMovieIntent && !aiInfo?.songName)) &&
-      (isExplicitAlbumSearch || isAlbumExact)
+  // AI-guided determination: Is user searching for a movie soundtrack or a specific song?
+  const isMovieSearch = Boolean(
+    topAlbum && (
+      aiInfo?.intent === 'movie' ||
+      (aiInfo?.movieOrAlbum && !aiInfo?.songName) ||
+      (isExplicitAlbumSearch && !isTrackExact) ||
+      (albumScore > trackScore && !isTrackExact)
+    )
   );
 
-  const handlePlayTopResult = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const normQuery = normalizeSearchText(debouncedQuery);
-    const cleanNormQ = normalizeSearchText(cleanQuery(debouncedQuery));
-    if (isTopMatchAlbum && topAlbum) {
+  const handlePlayMoviePlaylist = async (startIndex = 0) => {
+    if (movieTracks.length > 0) {
+      playTrack(movieTracks[startIndex], movieTracks, startIndex);
+      return;
+    }
+    if (topAlbum) {
       try {
         const res = await fetch(`/api/albums/${topAlbum.id}`);
         if (res.ok) {
           const data = await res.json();
           if (data.album?.tracks?.length > 0) {
-            // Find track in album that matches the search query (using exact, clean or fuzzy match)
-            const matchingTrackIdx = data.album.tracks.findIndex((t: TrackData) => {
-              const tNorm = normalizeSearchText(t.title);
-              return (
-                tNorm === normQuery ||
-                (cleanNormQ && tNorm === cleanNormQ) ||
-                tNorm.includes(normQuery) ||
-                normQuery.includes(tNorm) ||
-                fuzzyMatch(t.title, debouncedQuery)
-              );
-            });
-            const playIdx = matchingTrackIdx >= 0 ? matchingTrackIdx : 0;
-            playTrack(data.album.tracks[playIdx], data.album.tracks, playIdx);
+            playTrack(data.album.tracks[startIndex], data.album.tracks, startIndex);
             return;
           }
         }
       } catch {}
       router.push(`/albums/${topAlbum.id}`);
+    }
+  };
+
+  const handleShuffleMoviePlaylist = async () => {
+    let list = movieTracks;
+    if (list.length === 0 && topAlbum) {
+      try {
+        const res = await fetch(`/api/albums/${topAlbum.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.album?.tracks?.length > 0) {
+            list = data.album.tracks;
+          }
+        }
+      } catch {}
+    }
+    if (list.length > 0) {
+      toggleShuffle();
+      const randIdx = Math.floor(Math.random() * list.length);
+      playTrack(list[randIdx], list, randIdx);
+    }
+  };
+
+  const handlePlayTopResult = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isMovieSearch && topAlbum) {
+      handlePlayMoviePlaylist(0);
     } else if (topTrack) {
       playTrack(topTrack, results.tracks, 0);
     }
@@ -525,70 +573,253 @@ export default function SearchPage() {
       {/* Results View */}
       {!loading && hasResults && (
         <div className={styles.resultsContainer}>
-          {/* SPOTIFY-STYLE TOP RESULT CARD */}
-          {activeTab === 'all' && (isTopMatchAlbum ? topAlbum : topTrack) && (
-            <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Top Result</h2>
-              <div
-                className={styles.topResultCard}
-                onClick={() => {
-                  if (isTopMatchAlbum && topAlbum) {
-                    router.push(`/albums/${topAlbum.id}`);
-                  } else if (topTrack) {
-                    playTrack(topTrack, results.tracks, 0);
-                  }
-                }}
-              >
-                <div className={styles.topResultMain}>
-                  <Image
-                    src={
-                      (isTopMatchAlbum ? topAlbum?.coverImage : topTrack?.album?.coverImage) ||
-                      '/icons/default-artwork.png'
-                    }
-                    alt={(isTopMatchAlbum ? topAlbum?.title : topTrack?.title) || 'Result'}
-                    width={76}
-                    height={76}
-                    className={styles.topResultArt}
-                    unoptimized
-                  />
-                  <div className={styles.topResultMeta}>
-                    <span className={styles.topResultBadge}>
-                      {isTopMatchAlbum ? 'Movie Soundtrack / Playlist' : 'Song'}
+          {/* ========================================================= */}
+          {/* SCENARIO 1: MOVIE SEARCH -> MOVIE PLAYLIST HERO ON TOP    */}
+          {/* ========================================================= */}
+          {activeTab === 'all' && isMovieSearch && topAlbum && (
+            <>
+              <section className={styles.moviePlaylistSection}>
+                <div className={styles.moviePlaylistHeader}>
+                  <div className={styles.moviePlaylistHeaderLeft}>
+                    <Film size={20} className={styles.sectionIcon} />
+                    <h2 className={styles.sectionTitle}>Movie Soundtrack Playlist</h2>
+                  </div>
+                  {aiInfo?.isAiEnhanced && (
+                    <span className={styles.aiBadgeInline}>
+                      <Sparkles size={12} />
+                      AI Detected Movie
                     </span>
-                    <h3 className={styles.topResultTitle}>
-                      {isTopMatchAlbum ? topAlbum?.title : topTrack?.title}
-                    </h3>
-                    <p className={styles.topResultSubtitle}>
-                      {isTopMatchAlbum
-                        ? `${topAlbum?.artistName || 'Soundtrack'} • ${topAlbum?.releaseYear || 2026}`
-                        : `${topTrack?.artists?.map((a) => a.name).join(', ')} • ${topTrack?.album?.title || 'Single'}`}
+                  )}
+                </div>
+
+                <div className={styles.moviePlaylistCard}>
+                  <div className={styles.moviePlaylistCoverWrap}>
+                    <Image
+                      src={topAlbum.coverImage || '/icons/default-artwork.png'}
+                      alt={topAlbum.title}
+                      width={140}
+                      height={140}
+                      className={styles.moviePlaylistCover}
+                      unoptimized
+                    />
+                  </div>
+
+                  <div className={styles.moviePlaylistInfo}>
+                    <div className={styles.movieBadgeRow}>
+                      <span className={styles.movieBadge}>Official Movie Playlist</span>
+                      {aiInfo?.language && (
+                        <span className={styles.movieLangBadge}>{aiInfo.language}</span>
+                      )}
+                    </div>
+
+                    <h3 className={styles.moviePlaylistTitle}>{topAlbum.title}</h3>
+                    <p className={styles.moviePlaylistArtist}>
+                      {topAlbum.artistName || 'Soundtrack'} • {topAlbum.releaseYear || 2024}
                     </p>
+                    <p className={styles.moviePlaylistStats}>
+                      {movieTracks.length > 0 ? `${movieTracks.length} Soundtrack Tracks` : 'Full Soundtrack Album'} • 320kbps Studio Lossless
+                    </p>
+
+                    <div className={styles.moviePlaylistActions}>
+                      <button
+                        type="button"
+                        className={styles.moviePlayAllBtn}
+                        onClick={() => handlePlayMoviePlaylist(0)}
+                      >
+                        <Play size={18} fill="currentColor" />
+                        <span>Play Playlist</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.movieShuffleBtn}
+                        onClick={handleShuffleMoviePlaylist}
+                      >
+                        <Shuffle size={16} />
+                        <span>Shuffle</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.movieViewBtn}
+                        onClick={() => router.push(`/albums/${topAlbum.id}`)}
+                      >
+                        <Disc size={15} />
+                        <span>Album Details</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className={styles.topResultPlayBtn}
-                  onClick={handlePlayTopResult}
-                  aria-label="Play Top Result"
-                >
-                  <Play size={22} fill="currentColor" style={{ marginLeft: 2 }} />
-                </button>
-              </div>
-            </section>
+                {/* The movie's complete tracklist right inside the movie playlist view */}
+                {movieTracks.length > 0 && (
+                  <div className={styles.movieTracksContainer}>
+                    <div className={styles.movieTracksHeader}>
+                      <Music2 size={16} />
+                      <span>Soundtrack Tracks ({movieTracks.length})</span>
+                    </div>
+                    <div className={styles.trackList}>
+                      {movieTracks.map((track, idx) => (
+                        <TrackListItem
+                          key={`${track.id}-${idx}`}
+                          track={track}
+                          index={idx}
+                          playlistContext={movieTracks}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* Other Related Soundtracks */}
+              {otherAlbums.length > 0 && (
+                <section className={styles.section}>
+                  <div className={styles.sectionTitleRow}>
+                    <Film size={20} className={styles.sectionIcon} />
+                    <h2 className={styles.sectionTitle}>More Soundtracks & Albums ({otherAlbums.length})</h2>
+                  </div>
+                  <div className={styles.albumsGrid}>
+                    {otherAlbums.map((album) => (
+                      <AlbumCard key={album.id} album={album} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Other Related Tracks */}
+              {otherTracks.length > 0 && (
+                <section className={styles.section}>
+                  <div className={styles.sectionTitleRow}>
+                    <Music2 size={20} className={styles.sectionIcon} />
+                    <h2 className={styles.sectionTitle}>Other Related Tracks ({otherTracks.length})</h2>
+                  </div>
+                  <div className={styles.trackList}>
+                    {otherTracks.slice(0, 6).map((track, idx) => (
+                      <TrackListItem
+                        key={`${track.id}-${idx}`}
+                        track={track}
+                        index={idx}
+                        playlistContext={otherTracks}
+                      />
+                    ))}
+                  </div>
+                  {otherTracks.length > 6 && (
+                    <button
+                      type="button"
+                      className={styles.seeAllBtn}
+                      onClick={() => setActiveTab('songs')}
+                    >
+                      See all {otherTracks.length} tracks →
+                    </button>
+                  )}
+                </section>
+              )}
+            </>
           )}
 
-          {/* 1. SONGS (DIRECTLY UNDER TOP RESULT FOR INSTANT PLAYBACK) */}
-          {(activeTab === 'all' || activeTab === 'songs') && results.tracks.length > 0 && (
+          {/* ========================================================= */}
+          {/* SCENARIO 2: NOT A MOVIE SEARCH (SONG SEARCH OR GENERAL)   */}
+          {/* ========================================================= */}
+          {activeTab === 'all' && !isMovieSearch && (
+            <>
+              {/* SPOTIFY-STYLE TOP RESULT CARD FOR SONG */}
+              {topTrack && (
+                <section className={styles.section}>
+                  <h2 className={styles.sectionTitle}>Top Result</h2>
+                  <div
+                    className={styles.topResultCard}
+                    onClick={() => playTrack(topTrack, results.tracks, 0)}
+                  >
+                    <div className={styles.topResultMain}>
+                      <Image
+                        src={topTrack.album?.coverImage || '/icons/default-artwork.png'}
+                        alt={topTrack.title}
+                        width={76}
+                        height={76}
+                        className={styles.topResultArt}
+                        unoptimized
+                      />
+                      <div className={styles.topResultMeta}>
+                        <span className={styles.topResultBadge}>
+                          Song • Studio Lossless
+                        </span>
+                        <h3 className={styles.topResultTitle}>{topTrack.title}</h3>
+                        <p className={styles.topResultSubtitle}>
+                          {topTrack.artists?.map((a) => a.name).join(', ')} • {topTrack.album?.title || 'Single'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className={styles.topResultPlayBtn}
+                      onClick={handlePlayTopResult}
+                      aria-label="Play Top Result"
+                    >
+                      <Play size={22} fill="currentColor" style={{ marginLeft: 2 }} />
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {/* 1. SONGS LIST */}
+              {results.tracks.length > 0 && (
+                <section className={styles.section}>
+                  <div className={styles.sectionTitleRow}>
+                    <Music2 size={20} className={styles.sectionIcon} />
+                    <h2 className={styles.sectionTitle}>Songs ({results.tracks.length})</h2>
+                  </div>
+                  <div className={styles.trackList}>
+                    {results.tracks.slice(0, 6).map((track, idx) => (
+                      <TrackListItem
+                        key={`${track.id}-${idx}`}
+                        track={track}
+                        index={idx}
+                        playlistContext={results.tracks}
+                      />
+                    ))}
+                  </div>
+                  {results.tracks.length > 6 && (
+                    <button
+                      type="button"
+                      className={styles.seeAllBtn}
+                      onClick={() => setActiveTab('songs')}
+                    >
+                      See all {results.tracks.length} songs →
+                    </button>
+                  )}
+                </section>
+              )}
+
+              {/* 2. MOVIE SOUNDTRACKS & PLAYLISTS */}
+              {results.albums.length > 0 && (
+                <section className={styles.section}>
+                  <div className={styles.sectionTitleRow}>
+                    <Film size={20} className={styles.sectionIcon} />
+                    <h2 className={styles.sectionTitle}>
+                      Movie Soundtracks & Playlists ({results.albums.length})
+                    </h2>
+                  </div>
+                  <div className={styles.albumsGrid}>
+                    {results.albums.map((album) => (
+                      <AlbumCard key={album.id} album={album} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {/* ========================================================= */}
+          {/* EXPLICIT TAB VIEWS: SONGS / MOVIES                        */}
+          {/* ========================================================= */}
+          {activeTab === 'songs' && results.tracks.length > 0 && (
             <section className={styles.section}>
               <div className={styles.sectionTitleRow}>
                 <Music2 size={20} className={styles.sectionIcon} />
-                <h2 className={styles.sectionTitle}>
-                  {activeTab === 'all' ? 'Songs' : `Songs (${results.tracks.length})`}
-                </h2>
+                <h2 className={styles.sectionTitle}>All Songs ({results.tracks.length})</h2>
               </div>
               <div className={styles.trackList}>
-                {(activeTab === 'all' ? results.tracks.slice(0, 5) : results.tracks).map((track, idx) => (
+                {results.tracks.map((track, idx) => (
                   <TrackListItem
                     key={`${track.id}-${idx}`}
                     track={track}
@@ -597,41 +828,22 @@ export default function SearchPage() {
                   />
                 ))}
               </div>
-              {activeTab === 'all' && results.tracks.length > 5 && (
-                <button
-                  type="button"
-                  className={styles.seeAllBtn}
-                  onClick={() => setActiveTab('songs')}
-                >
-                  See all {results.tracks.length} songs →
-                </button>
-              )}
             </section>
           )}
 
-          {/* 2. MOVIE SOUNDTRACKS & PLAYLISTS */}
-          {(activeTab === 'all' || activeTab === 'movies') && results.albums.length > 0 && (
+          {activeTab === 'movies' && results.albums.length > 0 && (
             <section className={styles.section}>
               <div className={styles.sectionTitleRow}>
                 <Film size={20} className={styles.sectionIcon} />
                 <h2 className={styles.sectionTitle}>
-                  Movie Soundtracks & Playlists ({results.albums.length})
+                  All Movie Soundtracks & Playlists ({results.albums.length})
                 </h2>
               </div>
-
-              {activeTab === 'all' ? (
-                <div className={styles.albumsGrid}>
-                  {results.albums.map((album) => (
-                    <AlbumCard key={album.id} album={album} />
-                  ))}
-                </div>
-              ) : (
-                <div className={styles.albumsFullGrid}>
-                  {results.albums.map((album) => (
-                    <AlbumCard key={album.id} album={album} />
-                  ))}
-                </div>
-              )}
+              <div className={styles.albumsFullGrid}>
+                {results.albums.map((album) => (
+                  <AlbumCard key={album.id} album={album} />
+                ))}
+              </div>
             </section>
           )}
 

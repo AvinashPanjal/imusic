@@ -612,6 +612,8 @@ export class IndianMusicProvider implements CatalogueProvider {
           ? rawCover.replace(/150x150\.jpg$/, '500x500.jpg')
           : '/icons/default-artwork.png';
 
+        const albumTracks = tracks.filter((t) => t.album?.id === `saavn-album-${al.albumid}`);
+
         albums.push({
           id: `saavn-album-${al.albumid}`,
           title: decodeHtmlEntities(al.title),
@@ -620,6 +622,7 @@ export class IndianMusicProvider implements CatalogueProvider {
           releaseYear: parseInt(al.year, 10) || 2024,
           isLossless: true,
           isHiRes: false,
+          tracks: albumTracks,
         });
       }
 
