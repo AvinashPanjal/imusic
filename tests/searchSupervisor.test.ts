@@ -38,6 +38,13 @@ describe('AI Search Supervisor', () => {
     expect(res.songName?.toLowerCase()).toContain('illuminati');
   }, 30000);
 
+  it('strictly prevents false positive matches on unrelated words (e.g. balan the boy)', async () => {
+    const res = await superviseSearchQuery('balan the boy');
+    expect(res.songName).not.toBe('Pehle Bhi Main');
+    expect(res.movieOrAlbum).not.toBe('ANIMAL');
+    expect(res.correctedQuery.toLowerCase()).toContain('balan');
+  }, 30000);
+
   it('serves subsequent identical queries instantaneously from cache', async () => {
     const t0 = Date.now();
     const res1 = await superviseSearchQuery('aveshm');

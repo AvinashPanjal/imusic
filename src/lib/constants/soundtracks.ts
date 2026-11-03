@@ -236,31 +236,73 @@ export function levenshteinDistance(a: string, b: string): number {
 
 export function fuzzyMatch(source: string, target: string): boolean {
   if (!source || !target) return false;
-  const s = source.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const t = target.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!s || !t) return false;
-  if (s === t || s.includes(t) || t.includes(s)) return true;
+  const sRaw = source.toLowerCase().trim();
+  const tRaw = target.toLowerCase().trim();
+  if (sRaw === tRaw) return true;
 
-  if (Math.abs(s.length - t.length) <= 4 && levenshteinDistance(s, t) <= 3) {
-    return true;
+  const s = sRaw.replace(/[^a-z0-9]/g, '');
+  const t = tRaw.replace(/[^a-z0-9]/g, '');
+  if (!s || !t) return false;
+  if (s === t) return true;
+
+  const minLen = Math.min(s.length, t.length);
+  const maxLen = Math.max(s.length, t.length);
+
+  // Substring match: Only if the shorter string is at least 4 chars AND covers >= 70% of the longer
+  if (minLen >= 4 && minLen / maxLen >= 0.7) {
+    if (s.includes(t) || t.includes(s)) return true;
   }
 
-  const sWords = source.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-  const tWords = target.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-  let matched = 0;
+  // Full-string Levenshtein for slight typos:
+  // - Length >= 8: allow edit distance <= 2
+  // - Length >= 5: allow edit distance <= 1
+  // - Never allow fuzzy typos on very short strings (< 5 chars)
+  if (Math.abs(s.length - t.length) <= 2) {
+    if (minLen >= 8 && levenshteinDistance(s, t) <= 2) return true;
+    if (minLen >= 5 && levenshteinDistance(s, t) <= 1) return true;
+  }
+
+  // Token-based matching for multi-word phrases (e.g. "manjumel boys" vs "Manjummel Boys")
+  const sWords = sRaw.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const tWords = tRaw.split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  if (sWords.length === 0 || tWords.length === 0) return false;
+
+  // Track matched source indices so a single source token cannot be reused
+  const matchedSourceIndices = new Set<number>();
+  let matchedCount = 0;
+
   for (const tw of tWords) {
-    if (
-      sWords.some(
-        (sw) =>
-          sw.includes(tw) ||
-          tw.includes(sw) ||
-          levenshteinDistance(sw, tw) <= 2
-      )
-    ) {
-      matched++;
+    let bestMatchIdx = -1;
+    for (let i = 0; i < sWords.length; i++) {
+      if (matchedSourceIndices.has(i)) continue;
+      const sw = sWords[i];
+
+      // Exact word match
+      if (sw === tw) {
+        bestMatchIdx = i;
+        break;
+      }
+
+      // If word is >= 6 chars, allow edit distance 1
+      if (tw.length >= 6 && sw.length >= 6 && levenshteinDistance(sw, tw) <= 1) {
+        bestMatchIdx = i;
+        break;
+      }
+    }
+
+    if (bestMatchIdx !== -1) {
+      matchedSourceIndices.add(bestMatchIdx);
+      matchedCount++;
     }
   }
-  return matched > 0 && matched >= Math.ceil(tWords.length * 0.5);
+
+  // Require at least 75% of target words to match, and at least 2 matches
+  const targetMatchRatio = matchedCount / tWords.length;
+  if (tWords.length === 1) {
+    return false;
+  }
+
+  return matchedCount >= 2 && targetMatchRatio >= 0.75;
 }
 
 export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtrack[] {
@@ -271,14 +313,12 @@ export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtra
     .trim()
     .replace(/\s+/g, ' ');
   const effectiveQ = cleanQ && cleanQ.length >= 2 ? cleanQ : q;
-  const qNorm = effectiveQ.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const matched = FEATURED_SOUNDTRACKS.filter((st) => {
     // 1. Direct album title or artist match
     if (
       fuzzyMatch(st.title, effectiveQ) ||
-      fuzzyMatch(st.artistName || '', effectiveQ) ||
-      (st.genre && fuzzyMatch(st.genre, effectiveQ))
+      fuzzyMatch(st.artistName || '', effectiveQ)
     ) {
       return true;
     }
@@ -286,19 +326,14 @@ export function findMatchingFeaturedSoundtracks(query: string): FeaturedSoundtra
     // 2. Track title match within the album
     if (st.trackTitles) {
       return st.trackTitles.some((trackName) => {
-        const tNorm = trackName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        return (
-          tNorm === qNorm ||
-          tNorm.includes(qNorm) ||
-          qNorm.includes(tNorm) ||
-          fuzzyMatch(trackName, effectiveQ)
-        );
+        return fuzzyMatch(trackName, effectiveQ);
       });
     }
 
     return false;
   });
 
+  const qNorm = effectiveQ.toLowerCase().replace(/[^a-z0-9]/g, '');
   // Sort matched: rank exact track / album title matches at the top
   return matched.sort((a, b) => {
     const aAlbumNorm = a.title.toLowerCase().replace(/[^a-z0-9]/g, '');

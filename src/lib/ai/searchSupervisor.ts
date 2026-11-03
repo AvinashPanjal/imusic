@@ -6,7 +6,7 @@
  * Tamil, Hindi, Telugu, etc.), and multi-query variant generation for 100% accurate search.
  */
 
-import { findMatchingFeaturedSoundtracks, fuzzyMatch } from '@/lib/constants/soundtracks';
+import { FEATURED_SOUNDTRACKS } from '@/lib/constants/soundtracks';
 
 export interface AISearchAnalysis {
   originalQuery: string;
@@ -32,8 +32,8 @@ interface CacheEntry {
 const supervisorCache = new Map<string, CacheEntry>();
 
 const CANDIDATE_MODELS = [
+  'gemini-3.1-flash-lite',
   'gemini-flash-lite-latest',
-  'gemini-3.5-flash-lite',
 ];
 
 const SYSTEM_PROMPT = `You are the AI Music Search Supervisor for iMusic, an audio streaming app specializing in Indian (Malayalam, Tamil, Hindi, Telugu, Kannada) and Global music.
@@ -89,35 +89,52 @@ export async function superviseSearchQuery(rawQuery: string): Promise<AISearchAn
   }
 
   // Check local curated Indian soundtracks for 0ms instant identification
-  const matchedSoundtracks = findMatchingFeaturedSoundtracks(query);
-  if (matchedSoundtracks.length > 0) {
-    const st = matchedSoundtracks[0];
-    const qNorm = query.toLowerCase().replace(/[^a-z0-9]/g, '');
+  // ONLY for high-confidence exact matches of soundtrack titles or specific songs
+  const qNorm = query.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanQ = query
+    .toLowerCase()
+    .replace(/\b(songs?|movie|soundtrack|film|full|audio|video|mp3|lyrics|track|bgm|padam|pattu)\b/gi, '')
+    .trim();
+  const cleanQNorm = cleanQ.replace(/[^a-z0-9]/g, '');
 
-    // Check if the query specifically matched an individual song inside the album
-    const matchedTrack = st.trackTitles?.find((t) => {
+  // 1. Exact match on featured track titles (e.g. "illuminati", "illuminati song", "hukum")
+  let exactTrackSoundtrack: { st: (typeof FEATURED_SOUNDTRACKS)[0]; track: string } | null = null;
+  for (const st of FEATURED_SOUNDTRACKS) {
+    const matchedT = st.trackTitles?.find((t) => {
       const tNorm = t.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return tNorm === qNorm || tNorm.includes(qNorm) || qNorm.includes(tNorm) || fuzzyMatch(t, query);
+      return qNorm === tNorm || (cleanQNorm.length >= 3 && cleanQNorm === tNorm);
     });
-
-    if (matchedTrack && !fuzzyMatch(st.title, query)) {
-      // User specifically searched for a song!
-      const songAnalysis: AISearchAnalysis = {
-        originalQuery: query,
-        correctedQuery: matchedTrack,
-        intent: 'song',
-        movieOrAlbum: st.title,
-        songName: matchedTrack,
-        primaryArtists: st.artistName ? [st.artistName] : [],
-        language: st.genre?.split('/')[0]?.trim() || null,
-        searchVariants: [matchedTrack, `${matchedTrack} ${st.title}`, st.title],
-        isAiEnhanced: true,
-      };
-      supervisorCache.set(cacheKey, { data: songAnalysis, timestamp: Date.now() });
-      return songAnalysis;
+    if (matchedT) {
+      exactTrackSoundtrack = { st, track: matchedT };
+      break;
     }
+  }
 
-    // Otherwise, user searched for the movie/soundtrack album!
+  if (exactTrackSoundtrack) {
+    const { st, track } = exactTrackSoundtrack;
+    const songAnalysis: AISearchAnalysis = {
+      originalQuery: query,
+      correctedQuery: track,
+      intent: 'song',
+      movieOrAlbum: st.title,
+      songName: track,
+      primaryArtists: st.artistName ? [st.artistName] : [],
+      language: st.genre?.split('/')[0]?.trim() || null,
+      searchVariants: [track, `${track} ${st.title}`, st.title],
+      isAiEnhanced: true,
+    };
+    supervisorCache.set(cacheKey, { data: songAnalysis, timestamp: Date.now() });
+    return songAnalysis;
+  }
+
+  // 2. Exact match on featured movie/album titles (e.g. "aavesham", "aavesham songs", "jailer", "leo")
+  const exactSoundtrack = FEATURED_SOUNDTRACKS.find((st) => {
+    const stNorm = st.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return qNorm === stNorm || (cleanQNorm.length >= 3 && cleanQNorm === stNorm);
+  });
+
+  if (exactSoundtrack) {
+    const st = exactSoundtrack;
     const movieAnalysis: AISearchAnalysis = {
       originalQuery: query,
       correctedQuery: st.title,
@@ -176,7 +193,8 @@ export async function superviseSearchQuery(rawQuery: string): Promise<AISearchAn
       const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) continue;
 
-      const parsed = JSON.parse(text);
+      const cleanJson = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleanJson);
 
       const analysis: AISearchAnalysis = {
         originalQuery: query,
