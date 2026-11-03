@@ -1,4 +1,4 @@
-import { CatalogueProvider, ProviderSearchResult } from './types';
+import { CatalogueProvider, ProviderSearchResult, SearchOptions } from './types';
 import { PrivateLibraryProvider } from './PrivateLibraryProvider';
 import { IndianMusicProvider } from './IndianMusicProvider';
 import { AudiusProvider } from './AudiusProvider';
@@ -30,10 +30,10 @@ class ProviderRegistryClass {
     return Array.from(this.providers.values());
   }
 
-  public async searchAll(query: string): Promise<ProviderSearchResult[]> {
+  public async searchAll(query: string, options?: SearchOptions): Promise<ProviderSearchResult[]> {
     const active = this.getAll();
     const results = await Promise.allSettled(
-      active.map((provider) => provider.search(query))
+      active.map((provider) => provider.search(query, options))
     );
 
     return results

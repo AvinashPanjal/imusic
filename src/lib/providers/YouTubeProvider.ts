@@ -1,4 +1,4 @@
-import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult } from './types';
+import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult, SearchOptions } from './types';
 import { TrackData } from '@/types/music';
 
 function cleanYouTubeTitle(title: string): string {
@@ -134,8 +134,9 @@ export class YouTubeProvider implements CatalogueProvider {
     hasAudioQualityMetadata: true,
   };
 
-  public async search(query: string): Promise<ProviderSearchResult> {
-    if (!query || query.trim().length === 0) {
+  public async search(query: string, options?: SearchOptions): Promise<ProviderSearchResult> {
+    const activeQuery = options?.aiAnalysis?.correctedQuery || query;
+    if (!activeQuery || activeQuery.trim().length === 0) {
       return {
         providerCode: this.code,
         providerName: this.name,
@@ -145,7 +146,7 @@ export class YouTubeProvider implements CatalogueProvider {
       };
     }
 
-    const videos = await searchYouTubeVideos(query, 12);
+    const videos = await searchYouTubeVideos(activeQuery, 12);
     const tracks: TrackData[] = videos.map((v, i) => {
       const cleanTitle = cleanYouTubeTitle(v.title);
       const durationSeconds = parseDurationToSeconds(v.durationText);

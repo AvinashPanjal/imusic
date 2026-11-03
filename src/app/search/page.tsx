@@ -20,11 +20,25 @@ function stripLeadingArticles(str: string): string {
   return str.toLowerCase().replace(/^(the|a|an)\s+/i, '').trim();
 }
 
+interface AISearchData {
+  originalQuery: string;
+  correctedQuery: string;
+  intent: 'movie' | 'song' | 'artist' | 'genre' | 'general';
+  movieOrAlbum: string | null;
+  songName: string | null;
+  primaryArtists: string[];
+  language: string | null;
+  searchVariants?: string[];
+  isAiEnhanced: boolean;
+}
+
 function computeRelevanceScore(
   title: string,
   artistName: string | undefined,
   query: string,
-  isSaavn: boolean
+  isSaavn: boolean,
+  albumTitle?: string,
+  ai?: AISearchData | null
 ): number {
   if (!title || !query) return 0;
   const rawClean = cleanSongTitle(title);
@@ -44,6 +58,48 @@ function computeRelevanceScore(
   const normBase = normalizeSearchText(baseTitle);
 
   let score = 0;
+
+  // AI-guided ranking bonuses
+  if (ai?.isAiEnhanced) {
+    if (ai.movieOrAlbum && albumTitle) {
+      const normAiMovie = normalizeSearchText(stripLeadingArticles(ai.movieOrAlbum));
+      const normAlb = normalizeSearchText(albumTitle);
+      if (normAlb === normAiMovie || normAlb.startsWith(normAiMovie)) {
+        score += 1800;
+      } else if (normAlb.includes(normAiMovie) || fuzzyMatch(albumTitle, ai.movieOrAlbum)) {
+        score += 1000;
+      }
+    }
+
+    if (ai.songName) {
+      const normAiSong = normalizeSearchText(stripLeadingArticles(ai.songName));
+      if (normClean === normAiSong || normBase === normAiSong) {
+        score += 2200;
+      } else if (normClean.startsWith(normAiSong)) {
+        score += 1400;
+      } else if (normClean.includes(normAiSong) || fuzzyMatch(rawClean, ai.songName)) {
+        score += 800;
+      }
+    }
+
+    if (ai.correctedQuery) {
+      const normAiQ = normalizeSearchText(stripLeadingArticles(ai.correctedQuery));
+      if (normClean === normAiQ || normBase === normAiQ) {
+        score += 1200;
+      } else if (normClean.startsWith(normAiQ)) {
+        score += 600;
+      } else if (normClean.includes(normAiQ)) {
+        score += 350;
+      }
+    }
+
+    if (ai.primaryArtists && ai.primaryArtists.length > 0 && artistName) {
+      const normArtist = normalizeSearchText(artistName);
+      if (ai.primaryArtists.some((pa) => normArtist.includes(normalizeSearchText(pa)))) {
+        score += 200;
+      }
+    }
+  }
 
   // 1. Exact clean match or base title match without leading articles
   if (
@@ -100,6 +156,7 @@ export default function SearchPage() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'movies' | 'songs' | 'artists'>('all');
   const [loading, setLoading] = useState(false);
+  const [aiInfo, setAiInfo] = useState<AISearchData | null>(null);
   const [results, setResults] = useState<{
     tracks: TrackData[];
     albums: AlbumSummary[];
@@ -130,6 +187,7 @@ export default function SearchPage() {
   useEffect(() => {
     if (!debouncedQuery) {
       setResults({ tracks: [], albums: [], artists: [] });
+      setAiInfo(null);
       setLoading(false);
       return;
     }
@@ -141,6 +199,9 @@ export default function SearchPage() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}`);
         if (res.ok) {
           const data = await res.json();
+          const ai: AISearchData | null = data.ai || null;
+          setAiInfo(ai);
+
           const aggregatedTracks: TrackData[] = [];
           const aggregatedAlbums: AlbumSummary[] = [];
           const aggregatedArtists: ArtistSummary[] = [];
@@ -174,8 +235,8 @@ export default function SearchPage() {
             uniqueTracks.sort((a, b) => {
               const isSaavnA = a.id.startsWith('saavn');
               const isSaavnB = b.id.startsWith('saavn');
-              const scoreA = computeRelevanceScore(a.title, a.artists?.[0]?.name, debouncedQuery, isSaavnA);
-              const scoreB = computeRelevanceScore(b.title, b.artists?.[0]?.name, debouncedQuery, isSaavnB);
+              const scoreA = computeRelevanceScore(a.title, a.artists?.[0]?.name, debouncedQuery, isSaavnA, a.album?.title, ai);
+              const scoreB = computeRelevanceScore(b.title, b.artists?.[0]?.name, debouncedQuery, isSaavnB, b.album?.title, ai);
               if (scoreA !== scoreB) {
                 return scoreB - scoreA;
               }
@@ -185,8 +246,8 @@ export default function SearchPage() {
             uniqueAlbums.sort((a, b) => {
               const isSaavnA = a.id.startsWith('saavn');
               const isSaavnB = b.id.startsWith('saavn');
-              const scoreA = computeRelevanceScore(a.title, a.artistName, debouncedQuery, isSaavnA);
-              const scoreB = computeRelevanceScore(b.title, b.artistName, debouncedQuery, isSaavnB);
+              const scoreA = computeRelevanceScore(a.title, a.artistName, debouncedQuery, isSaavnA, a.title, ai);
+              const scoreB = computeRelevanceScore(b.title, b.artistName, debouncedQuery, isSaavnB, b.title, ai);
               if (scoreA !== scoreB) {
                 return scoreB - scoreA;
               }
@@ -231,6 +292,7 @@ export default function SearchPage() {
   const clearInput = () => {
     setQuery('');
     setDebouncedQuery('');
+    setAiInfo(null);
     setResults({ tracks: [], albums: [], artists: [] });
   };
 
@@ -243,24 +305,26 @@ export default function SearchPage() {
   const topAlbum = results.albums.length > 0 ? results.albums[0] : null;
   const topTrack = results.tracks.length > 0 ? results.tracks[0] : null;
 
+  const isMovieIntent = Boolean(aiInfo?.intent === 'movie' || aiInfo?.movieOrAlbum);
+
   const trackScore = topTrack
-    ? computeRelevanceScore(topTrack.title, topTrack.artists?.[0]?.name, debouncedQuery, topTrack.id.startsWith('saavn'))
+    ? computeRelevanceScore(topTrack.title, topTrack.artists?.[0]?.name, debouncedQuery, topTrack.id.startsWith('saavn'), topTrack.album?.title, aiInfo)
     : 0;
-  const isTrackExact = trackScore >= 300;
+  const isTrackExact = trackScore >= 500;
 
   const albumScore = topAlbum
-    ? computeRelevanceScore(topAlbum.title, topAlbum.artistName, debouncedQuery, topAlbum.id.startsWith('saavn'))
+    ? computeRelevanceScore(topAlbum.title, topAlbum.artistName, debouncedQuery, topAlbum.id.startsWith('saavn'), topAlbum.title, aiInfo)
     : 0;
   const isAlbumExact = albumScore >= 500;
 
   // Check if query explicitly asks for a soundtrack, album, or movie
   const queryLower = debouncedQuery.toLowerCase();
-  const isExplicitAlbumSearch = /\b(soundtrack|album|movie|film|playlist|ost)\b/.test(queryLower);
+  const isExplicitAlbumSearch = isMovieIntent || /\b(soundtrack|album|movie|film|playlist|ost)\b/.test(queryLower);
 
-  // If there is an exact or strong track match, Song ALWAYS wins Top Result (just like Spotify!)
+  // If there is an exact or strong track match, Song ALWAYS wins Top Result (unless user searched specifically for a movie)
   const isTopMatchAlbum = Boolean(
     topAlbum &&
-      !isTrackExact &&
+      (!isTrackExact || (isMovieIntent && !aiInfo?.songName)) &&
       (isExplicitAlbumSearch || isAlbumExact)
   );
 
@@ -329,6 +393,27 @@ export default function SearchPage() {
             </button>
           )}
         </form>
+
+        {/* AI Supervision Intelligence Pill */}
+        {aiInfo && aiInfo.isAiEnhanced && (
+          <div className={styles.aiSupervisionBanner}>
+            <Sparkles size={16} className={styles.aiSparkleIcon} />
+            <div className={styles.aiSupervisionText}>
+              <span>
+                AI Supervised:{' '}
+                <strong className={styles.aiHighlight}>{aiInfo.correctedQuery}</strong>
+              </span>
+              {aiInfo.movieOrAlbum && (
+                <span className={styles.aiSubText}>
+                  Soundtrack: <strong>{aiInfo.movieOrAlbum}</strong>
+                </span>
+              )}
+              {aiInfo.language && (
+                <span className={styles.aiLanguageBadge}>{aiInfo.language}</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Category Tabs for Fast Filter */}
         {hasResults && (

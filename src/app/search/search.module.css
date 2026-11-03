@@ -64,6 +64,58 @@
   color: var(--text-primary);
 }
 
+.aiSupervisionBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(59, 130, 246, 0.10));
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  margin-top: 2px;
+  animation: fadeIn 200ms ease-out;
+}
+
+.aiSparkleIcon {
+  color: var(--accent-hover);
+  flex-shrink: 0;
+}
+
+.aiSupervisionText {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.aiHighlight {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.aiSubText {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.aiSubText strong {
+  color: var(--text-accent);
+}
+
+.aiLanguageBadge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--accent-subtle);
+  color: var(--accent-hover);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+
 .filterRow {
   display: flex;
   gap: 8px;

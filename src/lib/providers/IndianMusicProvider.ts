@@ -1,4 +1,4 @@
-import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult } from './types';
+import { CatalogueProvider, ProviderCapabilities, ProviderSearchResult, SearchOptions } from './types';
 import { TrackData, AlbumSummary } from '@/types/music';
 import { findMatchingFeaturedSoundtracks, cleanSongTitle, fuzzyMatch } from '@/lib/constants/soundtracks';
 import CryptoJS from 'crypto-js';
@@ -177,20 +177,46 @@ export class IndianMusicProvider implements CatalogueProvider {
     return 'Direct 320kbps high-quality audio streams for personal ad-free playback.';
   }
 
-  public async search(query: string): Promise<ProviderSearchResult> {
+  public async search(query: string, options?: SearchOptions): Promise<ProviderSearchResult> {
     const q = query.trim();
+    const ai = options?.aiAnalysis;
 
     try {
-      const queriesToRun = q
-        ? getQueryVariants(q)
-        : [
-            'Bethlehem Kudumba Unit',
-            'Indrajaalam',
-            'Latest Malayalam Hits',
-            'Tamil Trending Hits',
-            'Latest Hindi Hits',
-            'The Weeknd Trending',
-          ];
+      const querySet = new Set<string>();
+
+      // Prioritize AI-supervised corrections and detected entities
+      if (ai?.isAiEnhanced) {
+        if (ai.correctedQuery) querySet.add(ai.correctedQuery);
+        if (ai.movieOrAlbum) querySet.add(ai.movieOrAlbum);
+        if (ai.songName) {
+          if (ai.movieOrAlbum) {
+            querySet.add(`${ai.songName} ${ai.movieOrAlbum}`);
+          }
+          querySet.add(ai.songName);
+        }
+        for (const variant of ai.searchVariants || []) {
+          querySet.add(variant);
+        }
+      }
+
+      // Add heuristic query variants as well
+      if (q) {
+        for (const v of getQueryVariants(q)) {
+          querySet.add(v);
+        }
+      }
+
+      const queriesToRun =
+        querySet.size > 0
+          ? Array.from(querySet).slice(0, 5)
+          : [
+              'Bethlehem Kudumba Unit',
+              'Indrajaalam',
+              'Latest Malayalam Hits',
+              'Tamil Trending Hits',
+              'Latest Hindi Hits',
+              'The Weeknd Trending',
+            ];
 
       const headers = SAAVN_HEADERS;
 
@@ -238,15 +264,31 @@ export class IndianMusicProvider implements CatalogueProvider {
       let rawResults = batchResults.flatMap((b) => b.rawSongs);
       let rawAlbumResults = batchResults.flatMap((b) => b.rawAlbums);
 
-      // Prepend any featured/blockbuster soundtracks matching query with fuzzy matching
-      const matchingFeatured = findMatchingFeaturedSoundtracks(q);
+      // Prepend any featured/blockbuster soundtracks matching query or AI movie name with fuzzy matching
+      const matchingFeatured = [
+        ...findMatchingFeaturedSoundtracks(q),
+        ...(ai?.movieOrAlbum ? findMatchingFeaturedSoundtracks(ai.movieOrAlbum) : []),
+      ];
+      const seenFeatured = new Set<string>();
       for (const st of matchingFeatured) {
+        if (seenFeatured.has(st.id)) continue;
+        seenFeatured.add(st.id);
         rawAlbumResults.unshift({
           albumid: st.id.replace('saavn-album-', ''),
           title: st.title,
           image: st.coverImage,
           music: st.artistName,
           year: String(st.releaseYear || 2026),
+        });
+      }
+
+      // If AI identified a movie/album, prioritize albums containing the canonical movie title
+      if (ai?.movieOrAlbum) {
+        const normAiMovie = normalizeSearchText(ai.movieOrAlbum);
+        rawAlbumResults.sort((a, b) => {
+          const matchA = normalizeSearchText(a.title).includes(normAiMovie) ? 1 : 0;
+          const matchB = normalizeSearchText(b.title).includes(normAiMovie) ? 1 : 0;
+          return matchB - matchA;
         });
       }
 
@@ -414,7 +456,13 @@ export class IndianMusicProvider implements CatalogueProvider {
       const normQNoArticle = normalizeSearchText(qNoArticle);
       const cleanNormQ = normalizeSearchText(cleanQuery(qNoArticle || q));
 
-      if (normQ) {
+      // AI Context variables for intelligent ranking
+      const normAiCorrected = ai?.correctedQuery ? normalizeSearchText(stripLeadingArticles(ai.correctedQuery)) : '';
+      const normAiMovie = ai?.movieOrAlbum ? normalizeSearchText(stripLeadingArticles(ai.movieOrAlbum)) : '';
+      const normAiSong = ai?.songName ? normalizeSearchText(stripLeadingArticles(ai.songName)) : '';
+      const aiArtistNorms = (ai?.primaryArtists || []).map((a) => normalizeSearchText(a));
+
+      if (normQ || normAiCorrected || normAiMovie) {
         const scoredTracks = tracks.map((track) => {
           const rawCleanTitle = cleanSongTitle(track.title);
           const cleanNoArticle = stripLeadingArticles(rawCleanTitle);
@@ -426,6 +474,46 @@ export class IndianMusicProvider implements CatalogueProvider {
           const normFullTitle = normalizeSearchText(track.title);
           const normAlbum = normalizeSearchText(track.album?.title || '');
           let score = 0;
+
+          // AI Movie Soundtrack match: Huge bonus if track belongs to detected movie
+          if (normAiMovie) {
+            if (normAlbum === normAiMovie || normAlbum.startsWith(normAiMovie)) {
+              score += 800;
+            } else if (normAlbum.includes(normAiMovie) || (track.album?.title && fuzzyMatch(track.album.title, ai!.movieOrAlbum!))) {
+              score += 550;
+            }
+          }
+
+          // AI Specific Song match: Top bonus if track matches AI detected song name
+          if (normAiSong) {
+            if (normBaseNoArticle === normAiSong || normCleanNoArticle === normAiSong) {
+              score += 950;
+            } else if (normCleanTitle.includes(normAiSong) || fuzzyMatch(rawCleanTitle, ai!.songName!)) {
+              score += 500;
+            }
+          }
+
+          // AI Corrected Query match
+          if (normAiCorrected && normAiCorrected !== normQ) {
+            if (normBaseNoArticle === normAiCorrected || normCleanNoArticle === normAiCorrected) {
+              score += 650;
+            } else if (normCleanTitle.startsWith(normAiCorrected)) {
+              score += 400;
+            } else if (normCleanTitle.includes(normAiCorrected) || fuzzyMatch(rawCleanTitle, ai!.correctedQuery)) {
+              score += 250;
+            }
+          }
+
+          // AI Artist matches
+          if (aiArtistNorms.length > 0) {
+            const hasAiArtist = track.artists?.some((a) => {
+              const na = normalizeSearchText(a.name);
+              return aiArtistNorms.some((an) => na.includes(an) || an.includes(na));
+            });
+            if (hasAiArtist) {
+              score += 120;
+            }
+          }
 
           // 1. Exact base or clean title match without leading articles
           if (normBaseNoArticle === normQNoArticle || (cleanNormQ && normBaseNoArticle === cleanNormQ)) {
@@ -535,11 +623,19 @@ export class IndianMusicProvider implements CatalogueProvider {
         });
       }
 
-      // Score and rank albums with Spotify-grade relevance
-      if (normQ) {
+      // Score and rank albums with Spotify-grade relevance + AI movie detection
+      if (normQ || normAiMovie) {
         const scoredAlbums = albums.map((album) => {
           const normTitle = normalizeSearchText(album.title);
           let score = 0;
+
+          if (normAiMovie) {
+            if (normTitle === normAiMovie || normTitle.startsWith(normAiMovie)) {
+              score += 900;
+            } else if (normTitle.includes(normAiMovie) || (album.title && fuzzyMatch(album.title, ai!.movieOrAlbum!))) {
+              score += 600;
+            }
+          }
 
           if (normTitle === normQ || (cleanNormQ && normTitle === cleanNormQ)) {
             score += 120;

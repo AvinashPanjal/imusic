@@ -15,6 +15,7 @@ interface DesktopSpotlightSearchProps {
 export const DesktopSpotlightSearch: React.FC<DesktopSpotlightSearchProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TrackData[]>([]);
+  const [aiData, setAiData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -27,6 +28,7 @@ export const DesktopSpotlightSearch: React.FC<DesktopSpotlightSearchProps> = ({ 
     } else {
       setQuery('');
       setResults([]);
+      setAiData(null);
     }
   }, [isOpen]);
 
@@ -34,6 +36,7 @@ export const DesktopSpotlightSearch: React.FC<DesktopSpotlightSearchProps> = ({ 
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setAiData(null);
       setLoading(false);
       return;
     }
@@ -44,6 +47,7 @@ export const DesktopSpotlightSearch: React.FC<DesktopSpotlightSearchProps> = ({ 
         const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`);
         if (res.ok) {
           const data = await res.json();
+          setAiData(data.ai || null);
           const list: TrackData[] = [];
           if (Array.isArray(data.results)) {
             for (const prov of data.results) {
@@ -134,6 +138,13 @@ export const DesktopSpotlightSearch: React.FC<DesktopSpotlightSearchProps> = ({ 
           )}
           <span className={styles.escPill}>Esc</span>
         </div>
+
+        {aiData?.isAiEnhanced && (
+          <div style={{ padding: '6px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(124, 58, 237, 0.12)', color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <Sparkles size={13} style={{ color: 'var(--accent-hover)' }} />
+            <span>AI Supervised: <strong style={{ color: 'var(--text-primary)' }}>{aiData.correctedQuery}</strong>{aiData.movieOrAlbum ? ` • ${aiData.movieOrAlbum}` : ''}</span>
+          </div>
+        )}
 
         <div className={styles.resultsArea}>
           {loading && (
