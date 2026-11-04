@@ -15,6 +15,7 @@ import {
   Compass,
   Cpu,
   Keyboard,
+  Youtube,
 } from 'lucide-react';
 import { usePlayerStore } from '@/store/playerStore';
 import styles from './DesktopSidebar.module.css';
@@ -40,6 +41,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   const collectionLinks = [
     { label: 'Your Library', href: '/library', icon: Library, exact: false },
     { label: 'Liked Songs', href: '/library?tab=favorites', icon: Heart, exact: false, isHeart: true },
+    { label: 'YouTube Liked', href: '/library?tab=youtube', icon: Youtube, exact: false, isYt: true },
     { label: 'Import Music', href: '/import', icon: UploadCloud, exact: false, badge: 'Spotify' },
   ];
 
@@ -110,6 +112,21 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
                   {link.isHeart ? (
                     <div className={styles.heartIconBox}>
                       <Heart size={13} fill="currentColor" />
+                    </div>
+                  ) : (link as any).isYt ? (
+                    <div
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        color: '#ef4444',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Youtube size={14} />
                     </div>
                   ) : (
                     <Icon size={19} className={styles.linkIcon} />

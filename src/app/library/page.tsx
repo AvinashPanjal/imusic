@@ -33,10 +33,15 @@ import {
   Search,
   X,
   Check,
+  Youtube,
+  RefreshCw,
+  LogOut,
+  Shuffle,
+  ShieldCheck,
 } from 'lucide-react';
 import styles from './library.module.css';
 
-type LibraryTab = 'playlists' | 'favorites' | 'downloaded' | 'tracks' | 'albums';
+type LibraryTab = 'playlists' | 'favorites' | 'downloaded' | 'tracks' | 'albums' | 'youtube';
 type SortField = 'date' | 'title' | 'artist';
 
 export default function LibraryPage() {
@@ -44,6 +49,14 @@ export default function LibraryPage() {
   const { playTrack } = usePlayerStore();
   const [activeTab, setActiveTab] = useState<LibraryTab>('playlists');
   const [sortField, setSortField] = useState<SortField>('date');
+
+  // Google / YouTube Liked Songs state
+  const [googleUser, setGoogleUser] = useState<{ id: string; name: string; email: string; picture: string } | null>(null);
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [ytLikedTracks, setYtLikedTracks] = useState<TrackData[]>([]);
+  const [ytLikedSearch, setYtLikedSearch] = useState('');
+  const [isLoadingYt, setIsLoadingYt] = useState(false);
+  const [ytSyncNotice, setYtSyncNotice] = useState<string | null>(null);
 
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
   const [favorites, setFavorites] = useState<TrackData[]>([]);
@@ -174,7 +187,101 @@ export default function LibraryPage() {
 
   useEffect(() => {
     loadLibrary();
+    fetchGoogleAuthStatus();
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab === 'youtube') {
+        setActiveTab('youtube');
+      } else if (tab === 'favorites') {
+        setActiveTab('favorites');
+      }
+    }
   }, []);
+
+  const fetchGoogleAuthStatus = async () => {
+    try {
+      const res = await fetch('/api/auth/google/me');
+      if (res.ok) {
+        const data = await res.json();
+        setIsGoogleConnected(Boolean(data.connected));
+        setGoogleUser(data.user || null);
+        if (data.connected) {
+          fetchYtLikedTracks();
+        }
+      }
+    } catch (err) {
+      console.warn('Error checking Google auth:', err);
+    }
+  };
+
+  const fetchYtLikedTracks = async () => {
+    setIsLoadingYt(true);
+    setYtSyncNotice('Fetching your YouTube liked songs...');
+    try {
+      const res = await fetch('/api/youtube/liked');
+      if (res.ok) {
+        const data = await res.json();
+        setYtLikedTracks(data.tracks || []);
+        setYtSyncNotice(null);
+      } else {
+        const errData = await res.json();
+        setYtSyncNotice(errData.error || 'Failed to load liked songs.');
+      }
+    } catch {
+      setYtSyncNotice('Error connecting to YouTube API.');
+    } finally {
+      setIsLoadingYt(false);
+    }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    if (!confirm('Are you sure you want to disconnect your Google account?')) return;
+    try {
+      await fetch('/api/auth/google/logout', { method: 'POST' });
+      setIsGoogleConnected(false);
+      setGoogleUser(null);
+      setYtLikedTracks([]);
+    } catch {}
+  };
+
+  const handlePlayAllYt = () => {
+    if (ytLikedTracks.length === 0) return;
+    playTrack(ytLikedTracks[0], ytLikedTracks);
+  };
+
+  const handleShuffleYt = () => {
+    if (ytLikedTracks.length === 0) return;
+    const shuffled = [...ytLikedTracks].sort(() => Math.random() - 0.5);
+    playTrack(shuffled[0], shuffled);
+  };
+
+  const handleImportYtToPlaylist = () => {
+    if (ytLikedTracks.length === 0) return;
+    const localPl: PlaylistData = {
+      id: `pl_yt_liked_${Date.now()}`,
+      title: 'YouTube Liked Songs',
+      description: `Imported from YouTube (${ytLikedTracks.length} tracks)`,
+      isPublic: false,
+      userId: 'local_user',
+      createdAt: new Date().toISOString(),
+      trackCount: ytLikedTracks.length,
+      tracks: ytLikedTracks.map((track, i) => ({ position: i + 1, track })),
+    };
+    LocalLibrary.savePlaylist(localPl);
+    setPlaylists((prev) => [localPl, ...prev.filter((p) => p.id !== localPl.id)]);
+    router.push(`/playlists/${localPl.id}`);
+  };
+
+  const filteredYtTracks = ytLikedTracks.filter((t) => {
+    if (!ytLikedSearch.trim()) return true;
+    const q = ytLikedSearch.toLowerCase();
+    return (
+      t.title.toLowerCase().includes(q) ||
+      t.artists?.some((a) => a.name.toLowerCase().includes(q))
+    );
+  });
 
   const handleCreatePlaylist = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -413,6 +520,15 @@ export default function LibraryPage() {
           onClick={() => setActiveTab('favorites')}
         >
           Favorites ({favorites.length})
+        </button>
+        <button
+          type="button"
+          className={`${styles.tabBtn} ${activeTab === 'youtube' ? styles.tabActive : ''}`}
+          onClick={() => setActiveTab('youtube')}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <Youtube size={15} color="#ef4444" />
+          <span>YouTube Liked {isGoogleConnected && ytLikedTracks.length > 0 ? `(${ytLikedTracks.length})` : ''}</span>
         </button>
         <button
           type="button"
@@ -704,6 +820,174 @@ export default function LibraryPage() {
               {albums.map((al) => (
                 <AlbumCard key={al.id} album={al} />
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: YouTube Liked Songs */}
+      {activeTab === 'youtube' && (
+        <div className={styles.tabContent}>
+          {!isGoogleConnected ? (
+            <div className={styles.ytConnectHero}>
+              <div className={styles.ytBadgeIcon}>
+                <Youtube size={36} />
+              </div>
+              <h2 className={styles.ytHeroTitle}>Sync Your YouTube Liked Songs</h2>
+              <p className={styles.ytHeroDesc}>
+                Connect your Google account to automatically import, shuffle, and stream all your liked songs from YouTube and YouTube Music in high-fidelity audio.
+              </p>
+              <a href="/api/auth/google" className={styles.googleLoginBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Sign in with Google</span>
+              </a>
+              <span className={styles.privacyNote}>
+                <ShieldCheck size={14} /> Read-only access • Your account credentials are never stored or shared.
+              </span>
+            </div>
+          ) : (
+            <div>
+              {/* Connected User Header Banner */}
+              <div className={styles.ytUserCard}>
+                <div className={styles.ytUserLeft}>
+                  {googleUser?.picture ? (
+                    <img
+                      src={googleUser.picture}
+                      alt={googleUser.name || 'User'}
+                      className={styles.ytUserAvatar}
+                    />
+                  ) : (
+                    <div className={styles.ytUserAvatarFallback}>
+                      {googleUser?.name?.[0]?.toUpperCase() || 'G'}
+                    </div>
+                  )}
+                  <div className={styles.ytUserDetails}>
+                    <div className={styles.ytUserName}>
+                      {googleUser?.name || 'Google User'}
+                      <span className={styles.ytUserBadge}>
+                        <Youtube size={12} /> YouTube Synced
+                      </span>
+                    </div>
+                    <span className={styles.ytUserEmail}>{googleUser?.email}</span>
+                  </div>
+                </div>
+
+                <div className={styles.ytUserActions}>
+                  <button
+                    type="button"
+                    className={styles.ytSyncBtn}
+                    onClick={fetchYtLikedTracks}
+                    disabled={isLoadingYt}
+                  >
+                    <RefreshCw size={14} className={isLoadingYt ? styles.spinnerSm : ''} />
+                    <span>{isLoadingYt ? 'Syncing...' : 'Sync Now'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.ytDisconnectBtn}
+                    onClick={handleDisconnectGoogle}
+                    title="Disconnect Google Account"
+                  >
+                    <LogOut size={13} />
+                    <span>Disconnect</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Controls bar */}
+              <div className={styles.ytControlBar}>
+                <div className={styles.ytControlsLeft}>
+                  <button
+                    type="button"
+                    className={styles.ytPlayAllBtn}
+                    onClick={handlePlayAllYt}
+                    disabled={filteredYtTracks.length === 0}
+                  >
+                    <Play size={16} fill="currentColor" />
+                    <span>Play All ({filteredYtTracks.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={styles.ytShuffleBtn}
+                    onClick={handleShuffleYt}
+                    disabled={filteredYtTracks.length === 0}
+                  >
+                    <Shuffle size={15} />
+                    <span>Shuffle</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={styles.ytImportBtn}
+                    onClick={handleImportYtToPlaylist}
+                    disabled={filteredYtTracks.length === 0}
+                    title="Save all liked songs as a permanent iMusic playlist"
+                  >
+                    <FolderPlus size={15} />
+                    <span>Save to Playlist</span>
+                  </button>
+                </div>
+
+                <div className={styles.ytSearchWrapper}>
+                  <Search size={15} className={styles.ytSearchIcon} />
+                  <input
+                    type="text"
+                    className={styles.ytSearchInput}
+                    placeholder="Search liked songs..."
+                    value={ytLikedSearch}
+                    onChange={(e) => setYtLikedSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Status Notice if syncing */}
+              {ytSyncNotice && (
+                <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {ytSyncNotice}
+                </div>
+              )}
+
+              {/* Tracks List */}
+              {filteredYtTracks.length === 0 ? (
+                <div className={styles.emptyView}>
+                  <Youtube size={44} className={styles.emptyIcon} style={{ color: '#ef4444' }} />
+                  <h3>{isLoadingYt ? 'Loading YouTube Liked Songs...' : 'No Liked Songs Found'}</h3>
+                  <p>
+                    {isLoadingYt
+                      ? 'Contacting YouTube Data API to fetch your music...'
+                      : 'Like some music videos or songs on YouTube, then click "Sync Now".'}
+                  </p>
+                </div>
+              ) : (
+                <div className={styles.trackList}>
+                  {filteredYtTracks.map((track, idx) => (
+                    <TrackListItem
+                      key={track.id}
+                      track={track}
+                      index={idx}
+                      playlistContext={filteredYtTracks}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

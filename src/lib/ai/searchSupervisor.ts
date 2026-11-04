@@ -22,7 +22,7 @@ export interface AISearchAnalysis {
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_CACHE_ENTRIES = 1200;
-const TIMEOUT_MS = 6000; // 6 seconds timeout for Gemini API call
+const TIMEOUT_MS = 20000; // 20 seconds timeout for Gemini API call
 
 interface CacheEntry {
   data: AISearchAnalysis;
