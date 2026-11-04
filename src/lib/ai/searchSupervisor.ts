@@ -32,8 +32,10 @@ interface CacheEntry {
 const supervisorCache = new Map<string, CacheEntry>();
 
 const CANDIDATE_MODELS = [
-  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
   'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
 ];
 
 const SYSTEM_PROMPT = `You are the AI Music Search Supervisor for iMusic, an audio streaming app specializing in Indian (Malayalam, Tamil, Hindi, Telugu, Kannada) and Global music.
@@ -55,12 +57,13 @@ Rules:
      * The app will prioritize this specific song track at the very top.
    - "artist": When user searches for a music composer, singer, or director (e.g. "Anirudh", "Sushin Shyam", "A.R. Rahman", "Sid Sriram", "Shreya Ghoshal", "K.J. Yesudas").
    - "genre" or "general": For generic moods, languages, or decades.
-3. Extract "movieOrAlbum" without filler words like "movie", "songs", "padam", "pattu", "soundtrack".
-4. Extract "songName" if and only if a specific song was requested.
-5. Extract "primaryArtists" (composers, singers).
-6. Specify "language" (Malayalam, Tamil, Hindi, Telugu, English, etc.).
-7. Generate 2-4 clean "searchVariants" optimized for JioSaavn and audio catalog search.
-8. "correctedQuery": Clean, human-readable corrected title.
+3. ANTI-HALLUCINATION (CRITICAL): If the query does not reasonably match a known song, movie, or artist, DO NOT invent or substitute a completely unrelated famous song or movie (e.g. do not guess "Pehle Bhi Main" or "Animal" for unrelated words like "balan the boy"). In that case, keep intent as "general" and correctedQuery close to the user input.
+4. Extract "movieOrAlbum" without filler words like "movie", "songs", "padam", "pattu", "soundtrack".
+5. Extract "songName" if and only if a specific song was requested.
+6. Extract "primaryArtists" (composers, singers).
+7. Specify "language" (Malayalam, Tamil, Hindi, Telugu, English, etc.).
+8. Generate 2-4 clean "searchVariants" optimized for audio catalog search.
+9. "correctedQuery": Clean, human-readable corrected title.
 
 Return ONLY JSON:
 {

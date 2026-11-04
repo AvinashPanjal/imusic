@@ -175,11 +175,17 @@ export async function clearGoogleSession(): Promise<void> {
   } catch {}
 }
 
+function getGoogleCredentials() {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim().replace(/^["']+|["']+$/g, '');
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim().replace(/^["']+|["']+$/g, '');
+  return { clientId, clientSecret };
+}
+
 /**
  * Generate Google OAuth 2.0 authorization URL
  */
 export function getGoogleOAuthUrl(origin: string): { url: string; state: string } {
-  const clientId = process.env.GOOGLE_CLIENT_ID || '';
+  const { clientId } = getGoogleCredentials();
   const redirectUri = `${origin}/api/auth/google/callback`;
   const state = crypto.randomBytes(24).toString('hex');
 
@@ -212,8 +218,7 @@ export async function exchangeGoogleCode(
   code: string,
   origin: string
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID || '';
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+  const { clientId, clientSecret } = getGoogleCredentials();
   const redirectUri = `${origin}/api/auth/google/callback`;
 
   const body = new URLSearchParams({
