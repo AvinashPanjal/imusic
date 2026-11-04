@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { cookies } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
 
 export interface GoogleUserSession {
   user: {
@@ -13,12 +14,29 @@ export interface GoogleUserSession {
   expiresAt: number; // Unix timestamp in ms
 }
 
-const COOKIE_NAME = 'imusic_google_session';
-const STATE_COOKIE_NAME = 'imusic_google_oauth_state';
+export const COOKIE_NAME = 'imusic_google_session';
+export const STATE_COOKIE_NAME = 'imusic_google_oauth_state';
 
 function getSecretKey(): Buffer {
   const secret = process.env.AUTH_SECRET || 'imusic-default-super-secure-key-32b!';
   return crypto.createHash('sha256').update(secret).digest();
+}
+
+/**
+ * Determine the exact origin URL for the incoming request
+ */
+export function getRequestOrigin(request: NextRequest): string {
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedProto = request.headers.get('x-forwarded-proto') || 'https';
+  if (forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+  const host = request.headers.get('host');
+  if (host) {
+    const proto = request.url.startsWith('https') ? 'https' : 'http';
+    return `${proto}://${host}`;
+  }
+  return request.nextUrl.origin;
 }
 
 /**
@@ -55,14 +73,36 @@ export function decryptSession(cookieValue: string): GoogleUserSession | null {
 }
 
 /**
+ * Read session directly from NextRequest cookies
+ */
+export function getGoogleSessionFromRequest(request: NextRequest): GoogleUserSession | null {
+  const sessionCookie = request.cookies.get(COOKIE_NAME);
+  if (!sessionCookie?.value) return null;
+  return decryptSession(sessionCookie.value);
+}
+
+/**
  * Get current Google session from cookies (with auto-refresh if expired)
  */
-export async function getGoogleSession(): Promise<GoogleUserSession | null> {
-  const cookieStore = cookies();
-  const sessionCookie = cookieStore.get(COOKIE_NAME);
-  if (!sessionCookie?.value) return null;
+export async function getGoogleSession(req?: NextRequest): Promise<GoogleUserSession | null> {
+  let sessionValue: string | undefined;
 
-  const session = decryptSession(sessionCookie.value);
+  if (req) {
+    sessionValue = req.cookies.get(COOKIE_NAME)?.value;
+  }
+
+  if (!sessionValue) {
+    try {
+      const cookieStore = cookies();
+      sessionValue = cookieStore.get(COOKIE_NAME)?.value;
+    } catch {
+      // In certain server contexts cookies() may throw
+    }
+  }
+
+  if (!sessionValue) return null;
+
+  const session = decryptSession(sessionValue);
   if (!session) return null;
 
   // If token is about to expire within 5 minutes and we have a refreshToken, refresh it
@@ -84,14 +124,17 @@ export async function getGoogleSession(): Promise<GoogleUserSession | null> {
 }
 
 /**
- * Save Google session into secure HTTP-only cookie
+ * Set session cookie directly on a NextResponse (e.g. on redirect response)
  */
-export async function setGoogleSession(session: GoogleUserSession): Promise<void> {
+export function setSessionCookieOnResponse(
+  response: NextResponse,
+  session: GoogleUserSession,
+  isSecure: boolean
+): void {
   const encrypted = encryptSession(session);
-  const cookieStore = cookies();
-  cookieStore.set(COOKIE_NAME, encrypted, {
+  response.cookies.set(COOKIE_NAME, encrypted, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure,
     sameSite: 'lax',
     path: '/',
     maxAge: 30 * 24 * 60 * 60, // 30 days
@@ -99,11 +142,37 @@ export async function setGoogleSession(session: GoogleUserSession): Promise<void
 }
 
 /**
+ * Clear session cookie directly on a NextResponse
+ */
+export function clearSessionCookieOnResponse(response: NextResponse): void {
+  response.cookies.delete(COOKIE_NAME);
+}
+
+/**
+ * Save Google session into secure HTTP-only cookie using cookies()
+ */
+export async function setGoogleSession(session: GoogleUserSession): Promise<void> {
+  const encrypted = encryptSession(session);
+  try {
+    const cookieStore = cookies();
+    cookieStore.set(COOKIE_NAME, encrypted, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+    });
+  } catch {}
+}
+
+/**
  * Clear Google session cookie
  */
 export async function clearGoogleSession(): Promise<void> {
-  const cookieStore = cookies();
-  cookieStore.delete(COOKIE_NAME);
+  try {
+    const cookieStore = cookies();
+    cookieStore.delete(COOKIE_NAME);
+  } catch {}
 }
 
 /**
@@ -126,6 +195,7 @@ export function getGoogleOAuthUrl(origin: string): { url: string; state: string 
     ].join(' '),
     access_type: 'offline',
     prompt: 'consent',
+    include_granted_scopes: 'true',
     state,
   });
 

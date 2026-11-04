@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleSession } from '@/lib/auth/googleAuth';
+import { getGoogleSession, getGoogleSessionFromRequest } from '@/lib/auth/googleAuth';
 import { TrackData } from '@/types/music';
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +44,10 @@ function cleanYouTubeSongTitle(rawTitle: string): { title: string; artist: strin
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getGoogleSession();
+    let session = getGoogleSessionFromRequest(request);
+    if (!session) {
+      session = await getGoogleSession(request);
+    }
     if (!session || !session.accessToken) {
       return NextResponse.json(
         {

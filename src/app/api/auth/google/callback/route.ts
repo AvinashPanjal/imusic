@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   exchangeGoogleCode,
   fetchGoogleUserInfo,
-  setGoogleSession,
+  getRequestOrigin,
+  setSessionCookieOnResponse,
+  GoogleUserSession,
+  STATE_COOKIE_NAME,
 } from '@/lib/auth/googleAuth';
 
 export const dynamic = 'force-dynamic';
@@ -12,11 +15,8 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code');
   const error = searchParams.get('error');
 
-  const origin =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (request.headers.get('x-forwarded-proto')
-      ? `${request.headers.get('x-forwarded-proto')}://${request.headers.get('host')}`
-      : request.nextUrl.origin);
+  const origin = getRequestOrigin(request);
+  const isSecure = origin.startsWith('https:');
 
   if (error) {
     console.error('Google OAuth error from query:', error);
@@ -34,16 +34,21 @@ export async function GET(request: NextRequest) {
     // 2. Fetch authenticated user's profile
     const userInfo = await fetchGoogleUserInfo(accessToken);
 
-    // 3. Save session into secure HTTP-only cookie
-    await setGoogleSession({
+    const session: GoogleUserSession = {
       user: userInfo,
       accessToken,
       refreshToken,
       expiresAt: Date.now() + expiresIn * 1000,
-    });
+    };
 
-    // 4. Redirect user back to YouTube Liked Songs library
-    return NextResponse.redirect(`${origin}/library?tab=youtube&connected=true`);
+    // 3. Create redirect response and attach session cookie directly on the response
+    const response = NextResponse.redirect(`${origin}/library?tab=youtube&connected=true`);
+    setSessionCookieOnResponse(response, session, isSecure);
+
+    // Clear state cookie
+    response.cookies.delete(STATE_COOKIE_NAME);
+
+    return response;
   } catch (err: any) {
     console.error('Error handling Google OAuth callback:', err);
     return NextResponse.redirect(

@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
-import { clearGoogleSession } from '@/lib/auth/googleAuth';
+import { clearSessionCookieOnResponse, clearGoogleSession } from '@/lib/auth/googleAuth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   await clearGoogleSession();
-  return NextResponse.json({ success: true });
+  const response = NextResponse.json({ success: true });
+  clearSessionCookieOnResponse(response);
+  return response;
 }
 
 export async function GET() {
   await clearGoogleSession();
-  return NextResponse.json({ success: true });
+  const response = NextResponse.json({ success: true });
+  clearSessionCookieOnResponse(response);
+  return response;
 }

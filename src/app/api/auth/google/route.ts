@@ -1,24 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleOAuthUrl } from '@/lib/auth/googleAuth';
-import { cookies } from 'next/headers';
+import { getGoogleOAuthUrl, getRequestOrigin, STATE_COOKIE_NAME } from '@/lib/auth/googleAuth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const origin =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      request.headers.get('x-forwarded-proto')
-        ? `${request.headers.get('x-forwarded-proto')}://${request.headers.get('host')}`
-        : request.nextUrl.origin;
-
+    const origin = getRequestOrigin(request);
     const { url, state } = getGoogleOAuthUrl(origin);
 
+    const isSecure = origin.startsWith('https:');
     const response = NextResponse.redirect(url);
     // Store state in a cookie for 10 minutes to protect against CSRF
-    response.cookies.set('imusic_google_oauth_state', state, {
+    response.cookies.set(STATE_COOKIE_NAME, state, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isSecure,
       sameSite: 'lax',
       path: '/',
       maxAge: 10 * 60,

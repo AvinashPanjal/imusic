@@ -38,6 +38,7 @@ import {
   LogOut,
   Shuffle,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 import styles from './library.module.css';
 
@@ -57,6 +58,7 @@ export default function LibraryPage() {
   const [ytLikedSearch, setYtLikedSearch] = useState('');
   const [isLoadingYt, setIsLoadingYt] = useState(false);
   const [ytSyncNotice, setYtSyncNotice] = useState<string | null>(null);
+  const [ytAuthError, setYtAuthError] = useState<string | null>(null);
 
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
   const [favorites, setFavorites] = useState<TrackData[]>([]);
@@ -197,17 +199,31 @@ export default function LibraryPage() {
       } else if (tab === 'favorites') {
         setActiveTab('favorites');
       }
+
+      const err = params.get('error');
+      if (err) {
+        setYtAuthError(decodeURIComponent(err));
+      }
+
+      if (params.get('connected') === 'true') {
+        window.history.replaceState({}, '', '/library?tab=youtube');
+        fetchGoogleAuthStatus();
+      }
     }
   }, []);
 
   const fetchGoogleAuthStatus = async () => {
     try {
-      const res = await fetch('/api/auth/google/me');
+      const res = await fetch('/api/auth/google/me', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (res.ok) {
         const data = await res.json();
-        setIsGoogleConnected(Boolean(data.connected));
+        const connected = Boolean(data.connected);
+        setIsGoogleConnected(connected);
         setGoogleUser(data.user || null);
-        if (data.connected) {
+        if (connected) {
           fetchYtLikedTracks();
         }
       }
@@ -220,7 +236,10 @@ export default function LibraryPage() {
     setIsLoadingYt(true);
     setYtSyncNotice('Fetching your YouTube liked songs...');
     try {
-      const res = await fetch('/api/youtube/liked');
+      const res = await fetch('/api/youtube/liked', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (res.ok) {
         const data = await res.json();
         setYtLikedTracks(data.tracks || []);
@@ -828,6 +847,43 @@ export default function LibraryPage() {
       {/* Tab: YouTube Liked Songs */}
       {activeTab === 'youtube' && (
         <div className={styles.tabContent}>
+          {ytAuthError && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 18px',
+                borderRadius: 12,
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+                fontSize: 13,
+                fontWeight: 500,
+                maxWidth: 680,
+                margin: '0 auto 16px',
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <strong>Sign-In Alert:</strong> {ytAuthError}
+              </div>
+              <button
+                type="button"
+                onClick={() => setYtAuthError(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  padding: 4,
+                }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          )}
+
           {!isGoogleConnected ? (
             <div className={styles.ytConnectHero}>
               <div className={styles.ytBadgeIcon}>
