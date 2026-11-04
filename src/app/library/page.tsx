@@ -59,6 +59,8 @@ export default function LibraryPage() {
   const [isLoadingYt, setIsLoadingYt] = useState(false);
   const [ytSyncNotice, setYtSyncNotice] = useState<string | null>(null);
   const [ytAuthError, setYtAuthError] = useState<string | null>(null);
+  const [ytFilter, setYtFilter] = useState<'music' | 'all'>('music');
+  const [ytTotalLoaded, setYtTotalLoaded] = useState<number>(0);
 
   const [playlists, setPlaylists] = useState<PlaylistData[]>([]);
   const [favorites, setFavorites] = useState<TrackData[]>([]);
@@ -232,17 +234,25 @@ export default function LibraryPage() {
     }
   };
 
-  const fetchYtLikedTracks = async () => {
+  const fetchYtLikedTracks = async (filterParam?: 'music' | 'all') => {
+    const targetFilter = filterParam || ytFilter;
     setIsLoadingYt(true);
-    setYtSyncNotice('Fetching your YouTube liked songs...');
+    setYtSyncNotice(
+      targetFilter === 'music'
+        ? 'Filtering and matching your YouTube music with studio lossless...'
+        : 'Fetching all liked YouTube videos...'
+    );
     try {
-      const res = await fetch('/api/youtube/liked', {
+      const res = await fetch(`/api/youtube/liked?filter=${targetFilter}`, {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache' },
       });
       if (res.ok) {
         const data = await res.json();
         setYtLikedTracks(data.tracks || []);
+        if (typeof data.totalLoaded === 'number') {
+          setYtTotalLoaded(data.totalLoaded);
+        }
         setYtSyncNotice(null);
       } else {
         const errData = await res.json();
@@ -949,7 +959,7 @@ export default function LibraryPage() {
                   <button
                     type="button"
                     className={styles.ytSyncBtn}
-                    onClick={fetchYtLikedTracks}
+                    onClick={() => fetchYtLikedTracks()}
                     disabled={isLoadingYt}
                   >
                     <RefreshCw size={14} className={isLoadingYt ? styles.spinnerSm : ''} />
@@ -964,6 +974,40 @@ export default function LibraryPage() {
                     <LogOut size={13} />
                     <span>Disconnect</span>
                   </button>
+                </div>
+              </div>
+
+              {/* Filter Switch & Studio Lossless Engine Notice */}
+              <div className={styles.ytFilterRow}>
+                <button
+                  type="button"
+                  className={`${styles.ytFilterPill} ${ytFilter === 'music' ? styles.ytFilterPillActive : ''}`}
+                  onClick={() => {
+                    setYtFilter('music');
+                    fetchYtLikedTracks('music');
+                  }}
+                >
+                  <Music size={13} />
+                  <span>Music Tracks Only</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.ytFilterPill} ${ytFilter === 'all' ? styles.ytFilterPillActive : ''}`}
+                  onClick={() => {
+                    setYtFilter('all');
+                    fetchYtLikedTracks('all');
+                  }}
+                >
+                  <Youtube size={13} />
+                  <span>All Liked Videos {ytTotalLoaded > 0 ? `(${ytTotalLoaded})` : ''}</span>
+                </button>
+
+                <div
+                  className={styles.ytLosslessBadge}
+                  title="Matches songs with Studio CD Quality 320 KBPS audio streams for seamless mobile & desktop playback"
+                >
+                  <Sparkles size={12} />
+                  <span>Studio Lossless Active</span>
                 </div>
               </div>
 

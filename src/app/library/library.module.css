@@ -1040,7 +1040,66 @@
   border-color: rgba(239, 68, 68, 0.25);
 }
 
+.ytFilterRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ytFilterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ytFilterPill:hover {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.ytFilterPillActive {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  font-weight: 600;
+}
+
+.ytLosslessBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #10b981;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .ytLosslessBadge {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .ytControlBar {
+
   display: flex;
   flex-wrap: wrap;
   align-items: center;

@@ -16,11 +16,11 @@ function parseISODuration(durationStr?: string): number {
 
 function cleanYouTubeSongTitle(rawTitle: string): { title: string; artist: string } {
   let title = rawTitle
-    .replace(/\[(Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video)\]/gi, '')
-    .replace(/\((Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video)\)/gi, '')
+    .replace(/\[(Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video|Full\s*Song|Full\s*Video|4K\s*Video)\]/gi, '')
+    .replace(/\((Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video|Full\s*Song|Full\s*Video|4K\s*Video)\)/gi, '')
     .trim();
 
-  // If title has "Artist - Song Title" or "Song Title - Artist"
+  // If title has "Artist - Song Title"
   if (title.includes(' - ')) {
     const parts = title.split(' - ');
     if (parts.length >= 2) {
@@ -32,14 +32,110 @@ function cleanYouTubeSongTitle(rawTitle: string): { title: string; artist: strin
   } else if (title.includes(' | ')) {
     const parts = title.split(' | ');
     if (parts.length >= 2) {
+      // Typically: "Song Name | Movie Name | Artist Names"
       return {
         title: parts[0].trim(),
-        artist: parts[1].trim(),
+        artist: parts.slice(1).join(', ').trim(),
       };
     }
   }
 
   return { title, artist: '' };
+}
+
+/**
+ * Intelligent filter to distinguish music tracks/songs from general YouTube videos
+ * (e.g., tech reviews, podcasts, tutorials, gameplay, vlogs)
+ */
+function isYouTubeMusicVideo(item: any): boolean {
+  const snippet = item.snippet || {};
+  const contentDetails = item.contentDetails || {};
+  const topicDetails = item.topicDetails || {};
+
+  // 1. YouTube Category ID 10 is exclusively "Music"
+  if (snippet.categoryId === '10') {
+    return true;
+  }
+
+  // 2. YouTube Topic Details: category Wikipedia ontology matches music
+  const topicCategories: string[] = topicDetails.topicCategories || [];
+  if (
+    topicCategories.some((cat) =>
+      /music|song|hip_hop|rock|pop_music|soundtrack|electronic|rhythm|asia|india/i.test(cat)
+    )
+  ) {
+    return true;
+  }
+
+  // 3. Music labels, artists, or Topic channels
+  const channel = (snippet.videoOwnerChannelTitle || snippet.channelTitle || '').toLowerCase();
+  const musicChannelIndicators = [
+    '- topic',
+    'vevo',
+    'music',
+    'records',
+    'audio',
+    'soundtracks',
+    't-series',
+    'zee music',
+    'sony music',
+    'saregama',
+    'muzik247',
+    'think music',
+    'aditya music',
+    'speed audio',
+    'tips official',
+    'yrf',
+    'lahari music',
+    'anirudh ravichander',
+    'sushin shyam',
+    'ar rahman',
+    'arijit singh',
+    'shreya ghoshal',
+    'diljit dosanjh',
+  ];
+  if (musicChannelIndicators.some((ind) => channel.includes(ind))) {
+    return true;
+  }
+
+  // 4. Video title keywords that strongly denote a music release
+  const rawTitle = (snippet.title || '').toLowerCase();
+  const musicTitleKeywords = [
+    'official video',
+    'official music video',
+    'official audio',
+    'lyric video',
+    'lyrics video',
+    'full song',
+    'full audio',
+    'soundtrack',
+    'song',
+    'audio track',
+    'original track',
+    'remix',
+    'lofi',
+    'acoustic',
+    'unplugged',
+    'pattu',
+    'paadal',
+    'geetham',
+    'bgm',
+    'theme music',
+    'feat.',
+    'ft.',
+    'prod.',
+  ];
+  if (musicTitleKeywords.some((kw) => rawTitle.includes(kw))) {
+    return true;
+  }
+
+  // 5. Song-length duration heuristic (60s to 600s) + formatting
+  const duration = parseISODuration(contentDetails.duration);
+  if (duration >= 50 && duration <= 600 && (snippet.title?.includes(' - ') || snippet.title?.includes(' | '))) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function GET(request: NextRequest) {
@@ -61,10 +157,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const pageToken = searchParams.get('pageToken') || '';
+    const filter = (searchParams.get('filter') || 'music').toLowerCase(); // 'music' (default) or 'all'
     const maxResults = Math.min(parseInt(searchParams.get('maxResults') || '50', 10), 50);
 
-    // Primary: fetch user's liked videos from YouTube Data API v3
-    let ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?myRating=like&part=snippet,contentDetails&maxResults=${maxResults}`;
+    // Primary: fetch user's liked videos with snippet, contentDetails, and topicDetails
+    let ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?myRating=like&part=snippet,contentDetails,topicDetails&maxResults=${maxResults}`;
     if (pageToken) ytApiUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
 
     let res = await fetch(ytApiUrl, {
@@ -116,7 +213,12 @@ export async function GET(request: NextRequest) {
     }
 
     const items = data.items || [];
-    const tracks: TrackData[] = items
+    const totalLoaded = items.length;
+
+    // Filter items if 'music' is requested
+    const filteredItems = filter === 'all' ? items : items.filter(isYouTubeMusicVideo);
+
+    const tracks: TrackData[] = filteredItems
       .map((item: any) => {
         const videoId = item.id?.videoId || item.id || item.contentDetails?.videoId;
         if (!videoId || typeof videoId !== 'string') return null;
@@ -162,21 +264,23 @@ export async function GET(request: NextRequest) {
             title: 'YouTube Liked Songs',
             coverImage,
             releaseYear: snippet.publishedAt ? new Date(snippet.publishedAt).getFullYear() : undefined,
+            isLossless: true,
           },
+          // Leave streamUrl undefined so AudioEngine resolves it dynamically to Studio Lossless 320kbps
           assets: [
             {
               id: `yt-asset-${videoId}`,
               trackId: `yt-${videoId}`,
-              format: 'aac',
+              format: 'mp4',
               codec: 'AAC',
-              bitrate: 256,
-              isLossless: false,
+              bitrate: 320,
+              isLossless: true,
               isHiRes: false,
               storageType: 'remote_stream',
               storageKey: `/api/stream/yt?v=${videoId}`,
             },
           ],
-          streamUrl: `/api/stream/yt?v=${videoId}`,
+          providerCode: 'youtube_liked',
           hasLyrics: false,
           playCount: 0,
         };
@@ -189,6 +293,9 @@ export async function GET(request: NextRequest) {
       connected: true,
       user: session.user,
       tracks,
+      filter,
+      totalLoaded,
+      musicCount: tracks.length,
       nextPageToken: data.nextPageToken || null,
       totalResults: data.pageInfo?.totalResults || tracks.length,
     });

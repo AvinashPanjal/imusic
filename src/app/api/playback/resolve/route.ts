@@ -93,6 +93,97 @@ async function resolveJioSaavnStream(
   return null;
 }
 
+// Dedicated Studio Lossless Audio Resolver for YouTube Liked Tracks
+async function resolveStudioLosslessStream(
+  title?: string,
+  artist?: string,
+  album?: string
+): Promise<{ streamUrl: string; title: string; artist?: string } | null> {
+  const songTitle = title || '';
+  if (!songTitle) return null;
+
+  const clean = cleanSongTitle(songTitle);
+  const primaryArtist = (artist || '')
+    .split(/[,&/|]/)[0]
+    .trim()
+    .replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '')
+    .trim();
+  const cleanAlbum = cleanSongTitle(album || '');
+
+  const candidateQueries: string[] = [];
+  if (clean && cleanAlbum && cleanAlbum.toLowerCase() !== clean.toLowerCase()) {
+    candidateQueries.push(`${clean} ${cleanAlbum}`);
+  }
+  if (clean && primaryArtist) {
+    candidateQueries.push(`${clean} ${primaryArtist}`);
+    candidateQueries.push(`${primaryArtist} ${clean}`);
+  }
+  if (clean) {
+    candidateQueries.push(clean);
+  }
+  const variants = getQueryVariants(clean || songTitle);
+  for (const v of variants) {
+    if (!candidateQueries.includes(v)) candidateQueries.push(v);
+  }
+
+  const SAAVN_BASE = 'https://www.jiosaavn.com/api.php';
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+  };
+
+  for (const query of candidateQueries.slice(0, 5)) {
+    try {
+      const searchUrl = `${SAAVN_BASE}?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=8&q=${encodeURIComponent(query)}`;
+      const sRes = await fetch(searchUrl, { headers });
+      if (sRes.ok) {
+        const data = await sRes.json();
+        const results = (data.results || []) as any[];
+
+        for (const item of results) {
+          const itemSong = item.song || item.title || '';
+          const itemArtist = item.primary_artists || item.singers || '';
+          if (
+            isAccurateTitleMatch(clean || songTitle, itemSong) &&
+            (!primaryArtist || isArtistCompatible(primaryArtist, itemArtist))
+          ) {
+            let directUrl = decryptMediaUrl(item.encrypted_media_url);
+            if (directUrl) {
+              directUrl = directUrl
+                .replace(/_96\.(mp4|m4a)/i, '_320.$1')
+                .replace(/_160\.(mp4|m4a)/i, '_320.$1');
+              return {
+                streamUrl: directUrl,
+                title: decodeHtmlEntities(itemSong || songTitle),
+                artist: decodeHtmlEntities(itemArtist || primaryArtist),
+              };
+            }
+          }
+        }
+
+        for (const item of results) {
+          const itemSong = item.song || item.title || '';
+          if (isAccurateTitleMatch(clean || songTitle, itemSong)) {
+            let directUrl = decryptMediaUrl(item.encrypted_media_url);
+            if (directUrl) {
+              directUrl = directUrl
+                .replace(/_96\.(mp4|m4a)/i, '_320.$1')
+                .replace(/_160\.(mp4|m4a)/i, '_320.$1');
+              return {
+                streamUrl: directUrl,
+                title: decodeHtmlEntities(itemSong || songTitle),
+                artist: decodeHtmlEntities(item.primary_artists || item.singers || ''),
+              };
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 // Universal Playable Stream Resolver: JioSaavn 320 KBPS Studio AAC first, verified YouTube audio stream fallback
 async function resolveAnyPlayableStream(
   title?: string,
@@ -238,13 +329,46 @@ export async function POST(request: NextRequest) {
       const vid = trackId.replace(/^(yt-|foreign-)/, '');
       const rawTitle = title || '';
 
-      // Strict YouTube fidelity: Always stream the exact YouTube video selected, never substitute with another singer
+      // 1. High-Fidelity Studio Match: Check if this YouTube liked song has an official 320 KBPS Studio Lossless AAC version on JioSaavn
+      if (rawTitle && rawTitle.length >= 2) {
+        try {
+          const losslessMatch = await resolveStudioLosslessStream(rawTitle, artist, album);
+          if (losslessMatch?.streamUrl && losslessMatch.streamUrl.startsWith('http')) {
+            return NextResponse.json({
+              streamUrl: losslessMatch.streamUrl,
+              youtubeId: vid,
+              trackId,
+              title: losslessMatch.title || rawTitle,
+              artist: losslessMatch.artist || artist,
+              recovered: true,
+              isLossless: true,
+              source: 'jiosaavn_studio_lossless',
+              asset: {
+                id: `lossless-saavn-${vid}`,
+                format: 'mp4',
+                codec: 'AAC',
+                bitrate: 320,
+                isLossless: true,
+                isHiRes: false,
+                storageType: 'remote_stream',
+                storageKey: losslessMatch.streamUrl,
+              },
+            });
+          }
+        } catch (matchErr) {
+          console.warn('Could not match YouTube track to studio lossless audio:', matchErr);
+        }
+      }
+
+      // 2. Strict YouTube fallback if not available in the studio catalogue
       return NextResponse.json({
         streamUrl: `/api/stream/yt?v=${vid}`,
         youtubeId: vid,
         trackId,
         title: rawTitle || 'YouTube Audio Track',
         recovered: false,
+        isLossless: false,
+        source: 'youtube_stream',
         asset: {
           id: `yt-asset-${vid}`,
           format: 'm4a',

@@ -448,29 +448,20 @@ export const AudioEngine: React.FC = () => {
     async (track: typeof currentTrack, forceRefresh = false): Promise<string | null> => {
       if (!track) return null;
 
-      // 1. YouTube direct stream URL or YouTube ID
-      if (track.streamUrl && track.streamUrl.startsWith('/api/stream/yt')) {
-        return track.streamUrl;
-      }
-      if (track.streamUrl && track.streamUrl.startsWith('youtube:')) {
-        return `/api/stream/yt?v=${track.streamUrl.replace('youtube:', '')}`;
-      }
-      if (track.id && track.id.startsWith('yt-')) {
-        return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
-      }
-      if (track.id && track.id.startsWith('foreign-') && /^[a-zA-Z0-9_-]{11}$/.test(track.id.replace('foreign-', '')) && track.providerCode === 'youtube') {
-        return `/api/stream/yt?v=${track.id.replace('foreign-', '')}`;
-      }
-
-      // 2. Direct standard audio URL (JioSaavn CDN, Audius, CC, etc.)
-      if (track.streamUrl && !forceRefresh && !track.streamUrl.startsWith('youtube:')) {
+      // 1. Direct standard audio URL (JioSaavn CDN, Audius, CC, etc.) - only if already an absolute HTTP audio link
+      if (track.streamUrl && !forceRefresh && track.streamUrl.startsWith('http') && !track.streamUrl.includes('/api/stream/yt')) {
         return track.streamUrl;
       }
 
-      // 3. Audio asset (only if not an unresolved YouTube reference)
+      // 2. Audio asset (only if not an unresolved YouTube reference)
       if (!forceRefresh) {
         const primaryAsset = track.assets?.[0];
-        if (primaryAsset && !primaryAsset.storageKey?.includes('/api/stream/yt') && !primaryAsset.storageKey?.startsWith('youtube:')) {
+        if (
+          primaryAsset &&
+          primaryAsset.storageKey?.startsWith('http') &&
+          !primaryAsset.storageKey?.includes('/api/stream/yt') &&
+          !primaryAsset.storageKey?.startsWith('youtube:')
+        ) {
           if (primaryAsset.storageType === 'remote_stream') {
             return primaryAsset.storageKey;
           }
@@ -480,7 +471,7 @@ export const AudioEngine: React.FC = () => {
         }
       }
 
-      // Resolve through the playback resolve endpoint
+      // 3. Resolve through playback resolve endpoint (matches YouTube tracks to 320kbps Studio Lossless first)
       try {
         const res = await fetch('/api/playback/resolve', {
           method: 'POST',
@@ -494,18 +485,18 @@ export const AudioEngine: React.FC = () => {
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.youtubeId) {
-            return data.streamUrl || `/api/stream/yt?v=${data.youtubeId}`;
-          }
           if (data.streamUrl) {
             return data.streamUrl;
+          }
+          if (data.youtubeId) {
+            return `/api/stream/yt?v=${data.youtubeId}`;
           }
         }
       } catch (err) {
         console.error('Error resolving stream URL:', err);
       }
 
-      // Fallback for YouTube-only track if studio resolver was unavailable
+      // 4. Fallback for YouTube-only track if studio resolver was unavailable
       if (track.id && track.id.startsWith('yt-')) {
         return `/api/stream/yt?v=${track.id.replace('yt-', '')}`;
       }
@@ -621,12 +612,13 @@ export const AudioEngine: React.FC = () => {
       return;
     }
 
-    // FAST PATH 1: Direct standard audio URL (JioSaavn CDN, Audius, or YouTube direct stream)
+    // FAST PATH 1: Direct standard audio URL (pre-resolved JioSaavn CDN, Audius, etc.)
     const directPlayUrl =
-      currentTrack.streamUrl && !currentTrack.streamUrl.startsWith('youtube:')
+      currentTrack.streamUrl &&
+      currentTrack.streamUrl.startsWith('http') &&
+      !currentTrack.streamUrl.includes('/api/stream/yt') &&
+      !currentTrack.streamUrl.startsWith('youtube:')
         ? currentTrack.streamUrl
-        : ytId
-        ? `/api/stream/yt?v=${ytId}`
         : null;
 
     if (directPlayUrl) {
@@ -882,24 +874,12 @@ export const AudioEngine: React.FC = () => {
         return;
       }
 
-      // Check if user is on mobile
-      const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-      // Only fallback to YouTube iframe on desktop where background tab playback is allowed.
-      // On mobile, YouTube iframes are strictly killed by the OS upon screen lock.
-      if (ytId && !isMobile) {
-        console.log(`Direct audio stream failed on desktop for ${ytId}. Falling back to YouTube iframe player.`);
-        directStreamFailedRef.current = true;
-        playViaYouTubePlayer(ytId);
-        return;
-      }
-
       if (retryCountRef.current === 0 && currentTrack) {
         retryCountRef.current += 1;
         console.log(`Attempting stream recovery for track: ${currentTrack.title}`);
         try {
           const freshUrl = await resolveTrackUrl(currentTrack, true);
-          if (freshUrl && audio) {
+          if (freshUrl && audio && freshUrl !== audio.src) {
             console.log(`Recovered alternative stream URL: ${freshUrl.substring(0, 45)}...`);
             audio.src = freshUrl;
             audio.load();
@@ -909,6 +889,14 @@ export const AudioEngine: React.FC = () => {
         } catch (recoverErr) {
           console.warn('Alternative stream recovery attempt failed:', recoverErr);
         }
+      }
+
+      // Fallback to client YouTube player if direct audio stream failed
+      if (ytId) {
+        console.log(`Direct audio stream failed for ${ytId}. Falling back to client YouTube player.`);
+        directStreamFailedRef.current = true;
+        playViaYouTubePlayer(ytId);
+        return;
       }
 
       setError('Audio stream unavailable. Skipping to next track...');
