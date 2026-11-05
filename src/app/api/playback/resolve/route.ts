@@ -108,15 +108,16 @@ async function resolveStudioLosslessStream(
     .trim()
     .replace(/\b(official|music|records|audio|channel|vevo|topic)\b/gi, '')
     .trim();
-  const cleanAlbum = cleanSongTitle(album || '');
+  const rawAlbum = (album || '').trim();
+  const isGenericAlbum = /^(youtube\s*(liked\s*songs|stream)?|single|album|unknown)$/i.test(rawAlbum);
+  const cleanAlbum = isGenericAlbum ? '' : cleanSongTitle(rawAlbum);
 
   const candidateQueries: string[] = [];
-  if (clean && cleanAlbum && cleanAlbum.toLowerCase() !== clean.toLowerCase()) {
-    candidateQueries.push(`${clean} ${cleanAlbum}`);
-  }
   if (clean && primaryArtist) {
     candidateQueries.push(`${clean} ${primaryArtist}`);
-    candidateQueries.push(`${primaryArtist} ${clean}`);
+  }
+  if (clean && cleanAlbum && cleanAlbum.toLowerCase() !== clean.toLowerCase()) {
+    candidateQueries.push(`${clean} ${cleanAlbum}`);
   }
   if (clean) {
     candidateQueries.push(clean);

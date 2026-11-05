@@ -35,37 +35,52 @@ export function extractYouTubeVideoId(input: string): string | null {
   return null;
 }
 
-function cleanTitle(title: string): { title: string; artist: string } {
-  if (!title) return { title: 'YouTube Audio Track', artist: 'YouTube' };
-  
-  // Clean standard noise
-  let cleaned = title
-    .replace(/\s*\(Official\s*(?:Music\s*)?(?:Video|Audio|Lyric\s*Video|HD|4K|Visualizer)?\)/gi, '')
-    .replace(/\s*\[Official\s*(?:Music\s*)?(?:Video|Audio|Lyric\s*Video|HD|4K|Visualizer)?\]/gi, '')
-    .replace(/\s*\(Full\s*(?:Song|Video|Audio)\)/gi, '')
-    .replace(/\s*\[Full\s*(?:Song|Video|Audio)\]/gi, '')
-    .replace(/\s*\(Lyric\s*Video\)/gi, '')
-    .replace(/\s*\[Lyric\s*Video\]/gi, '')
-    .replace(/\s*\(Audio\)/gi, '')
-    .replace(/\s*\[Audio\]/gi, '')
-    .replace(/\s*\(Video\)/gi, '')
-    .replace(/\s*\[Video\]/gi, '')
-    .replace(/\s*\|.*$/g, '')
+function cleanTitle(rawTitle: string, authorName?: string): { title: string; artist: string } {
+  let text = (rawTitle || '').trim();
+
+  // Strip common noisy video tags
+  text = text
+    .replace(/\s*\[(?:Official\s*)?(?:Music\s*)?(?:Video|Audio|HD|4K|Visualizer|Lyric\s*Video|Lyrics|Full\s*(?:Song|Video|Audio)|Lyrical|4K\s*Video)\]/gi, '')
+    .replace(/\s*\((?:Official\s*)?(?:Music\s*)?(?:Video|Audio|HD|4K|Visualizer|Lyric\s*Video|Lyrics|Full\s*(?:Song|Video|Audio)|Lyrical|4K\s*Video)\)/gi, '')
     .trim();
 
-  // Often titles are formatted as "Artist - Song Name"
-  if (cleaned.includes(' - ')) {
-    const parts = cleaned.split(' - ');
-    if (parts.length >= 2) {
-      const art = parts[0].trim();
-      const song = parts.slice(1).join(' - ').trim();
-      if (art && song) {
-        return { title: song, artist: art };
+  let title = text;
+  let artist = authorName || 'YouTube';
+
+  // 1. Pipe format e.g. "Song Name | Movie Name | Artists"
+  const pipeParts = text.split('|').map((p) => p.trim()).filter(Boolean);
+  if (pipeParts.length > 1) {
+    title = pipeParts[0];
+    artist = pipeParts.slice(1).join(', ');
+  }
+
+  // 2. Colon format e.g. "ANIMAL: SATRANGA" or "Leo: Badass"
+  if (title.includes(':')) {
+    const colonParts = title.split(':').map((p) => p.trim()).filter(Boolean);
+    if (colonParts.length === 2) {
+      title = colonParts[1];
+      artist = colonParts[0] + (artist ? ', ' + artist : '');
+    }
+  }
+
+  // 3. Hyphen format e.g. "Kaavaalaa - Lyric Video" or "Artist - Song"
+  if (title.includes(' - ')) {
+    const hypParts = title.split(' - ').map((p) => p.trim()).filter(Boolean);
+    if (hypParts.length === 2) {
+      if (/lyric|audio|video|teaser|trailer|song/i.test(hypParts[1])) {
+        title = hypParts[0];
+      } else if (/lyric|audio|video|teaser|trailer|song/i.test(hypParts[0])) {
+        title = hypParts[1];
+      } else if (authorName && authorName.toLowerCase().includes(hypParts[0].toLowerCase())) {
+        artist = hypParts[0];
+        title = hypParts[1];
+      } else {
+        title = hypParts[0];
       }
     }
   }
 
-  return { title: cleaned, artist: 'YouTube' };
+  return { title: title.trim() || 'YouTube Audio Track', artist: artist.trim() || 'YouTube' };
 }
 
 /**
@@ -85,9 +100,9 @@ export async function fetchYouTubeTrackInfo(urlOrId: string): Promise<TrackData 
     const res = await fetch(oembedUrl);
     if (res.ok) {
       const data = await res.json();
-      const parsed = cleanTitle(data.title || '');
+      const parsed = cleanTitle(data.title || '', data.author_name);
       title = parsed.title;
-      artist = data.author_name || parsed.artist;
+      artist = parsed.artist || data.author_name || 'YouTube';
       thumbnail = data.thumbnail_url || standardThumb;
     }
   } catch (err) {

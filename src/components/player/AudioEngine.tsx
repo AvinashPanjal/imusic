@@ -545,6 +545,20 @@ export const AudioEngine: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    // Stop previous track immediately so old audio never continues or replays
+    if (audio) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = '';
+      } catch {}
+    }
+    if (ytPlayerRef.current) {
+      try {
+        ytPlayerRef.current.stopVideo?.();
+      } catch {}
+    }
+
     let active = true;
 
     const ytId = extractYouTubeId(currentTrack);

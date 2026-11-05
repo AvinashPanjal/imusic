@@ -14,33 +14,52 @@ function parseISODuration(durationStr?: string): number {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function cleanYouTubeSongTitle(rawTitle: string): { title: string; artist: string } {
-  let title = rawTitle
-    .replace(/\[(Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video|Full\s*Song|Full\s*Video|4K\s*Video)\]/gi, '')
-    .replace(/\((Official\s*(?:Music\s*)?Video|Audio|HD|4K|Lyrics?|Visualizer|Lyric\s*Video|Full\s*Song|Full\s*Video|4K\s*Video)\)/gi, '')
+function cleanYouTubeSongTitle(rawTitle: string, channelTitle?: string): { title: string; artist: string } {
+  let text = (rawTitle || '').trim();
+
+  // Strip common noisy video tags
+  text = text
+    .replace(/\s*\[(?:Official\s*)?(?:Music\s*)?(?:Video|Audio|HD|4K|Visualizer|Lyric\s*Video|Lyrics|Full\s*(?:Song|Video|Audio)|Lyrical|4K\s*Video)\]/gi, '')
+    .replace(/\s*\((?:Official\s*)?(?:Music\s*)?(?:Video|Audio|HD|4K|Visualizer|Lyric\s*Video|Lyrics|Full\s*(?:Song|Video|Audio)|Lyrical|4K\s*Video)\)/gi, '')
     .trim();
 
-  // If title has "Artist - Song Title"
-  if (title.includes(' - ')) {
-    const parts = title.split(' - ');
-    if (parts.length >= 2) {
-      return {
-        artist: parts[0].trim(),
-        title: parts.slice(1).join(' - ').trim(),
-      };
-    }
-  } else if (title.includes(' | ')) {
-    const parts = title.split(' | ');
-    if (parts.length >= 2) {
-      // Typically: "Song Name | Movie Name | Artist Names"
-      return {
-        title: parts[0].trim(),
-        artist: parts.slice(1).join(', ').trim(),
-      };
+  let title = text;
+  let artist = channelTitle || '';
+
+  // 1. Pipe format e.g. "Song Name | Movie Name | Artists"
+  const pipeParts = text.split('|').map((p) => p.trim()).filter(Boolean);
+  if (pipeParts.length > 1) {
+    title = pipeParts[0];
+    artist = pipeParts.slice(1).join(', ');
+  }
+
+  // 2. Colon format e.g. "ANIMAL: SATRANGA" or "Leo: Badass"
+  if (title.includes(':')) {
+    const colonParts = title.split(':').map((p) => p.trim()).filter(Boolean);
+    if (colonParts.length === 2) {
+      title = colonParts[1];
+      artist = colonParts[0] + (artist ? ', ' + artist : '');
     }
   }
 
-  return { title, artist: '' };
+  // 3. Hyphen format e.g. "Kaavaalaa - Lyric Video" or "Artist - Song"
+  if (title.includes(' - ')) {
+    const hypParts = title.split(' - ').map((p) => p.trim()).filter(Boolean);
+    if (hypParts.length === 2) {
+      if (/lyric|audio|video|teaser|trailer|song/i.test(hypParts[1])) {
+        title = hypParts[0];
+      } else if (/lyric|audio|video|teaser|trailer|song/i.test(hypParts[0])) {
+        title = hypParts[1];
+      } else if (channelTitle && channelTitle.toLowerCase().includes(hypParts[0].toLowerCase())) {
+        artist = hypParts[0];
+        title = hypParts[1];
+      } else {
+        title = hypParts[0];
+      }
+    }
+  }
+
+  return { title: title.trim(), artist: artist.trim() };
 }
 
 /**
@@ -220,7 +239,11 @@ export async function GET(request: NextRequest) {
 
     const tracks: TrackData[] = filteredItems
       .map((item: any) => {
-        const videoId = item.id?.videoId || item.id || item.contentDetails?.videoId;
+        const videoId =
+          item.snippet?.resourceId?.videoId ||
+          item.contentDetails?.videoId ||
+          item.id?.videoId ||
+          (typeof item.id === 'string' ? item.id : null);
         if (!videoId || typeof videoId !== 'string') return null;
 
         const snippet = item.snippet || {};
@@ -233,7 +256,7 @@ export async function GET(request: NextRequest) {
         }
 
         const channelTitle = snippet.videoOwnerChannelTitle || snippet.channelTitle || 'YouTube Artist';
-        const { title: parsedTitle, artist: parsedArtist } = cleanYouTubeSongTitle(rawTitle);
+        const { title: parsedTitle, artist: parsedArtist } = cleanYouTubeSongTitle(rawTitle, channelTitle);
         const finalTitle = parsedTitle || rawTitle;
         const finalArtist = parsedArtist || channelTitle;
 
