@@ -254,8 +254,7 @@ export async function exchangeGoogleCode(
 export async function refreshGoogleAccessToken(
   refreshToken: string
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID || '';
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+  const { clientId, clientSecret } = getGoogleCredentials();
 
   const body = new URLSearchParams({
     client_id: clientId,
@@ -271,7 +270,8 @@ export async function refreshGoogleAccessToken(
   });
 
   if (!res.ok) {
-    throw new Error(`Google token refresh failed: ${res.status}`);
+    const errText = await res.text();
+    throw new Error(`Google token refresh failed: ${res.status} ${errText}`);
   }
 
   const data = await res.json();

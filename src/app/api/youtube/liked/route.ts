@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGoogleSession, getGoogleSessionFromRequest } from '@/lib/auth/googleAuth';
+import {
+  getGoogleSession,
+  getGoogleSessionFromRequest,
+  refreshGoogleAccessToken,
+  setSessionCookieOnResponse,
+} from '@/lib/auth/googleAuth';
 import { TrackData } from '@/types/music';
 
 export const dynamic = 'force-dynamic';
@@ -174,6 +179,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    let tokenRefreshed = false;
+    const isExpired = session.expiresAt && Date.now() > session.expiresAt - 5 * 60 * 1000;
+    if (isExpired && session.refreshToken) {
+      try {
+        const refreshed = await refreshGoogleAccessToken(session.refreshToken);
+        if (refreshed.accessToken) {
+          session.accessToken = refreshed.accessToken;
+          session.expiresAt = Date.now() + refreshed.expiresIn * 1000;
+          if (refreshed.refreshToken) session.refreshToken = refreshed.refreshToken;
+          tokenRefreshed = true;
+        }
+      } catch (e) {
+        console.warn('Pre-emptive token refresh failed:', e);
+      }
+    }
+
     const { searchParams } = new URL(request.url);
     const pageToken = searchParams.get('pageToken') || '';
     const filter = (searchParams.get('filter') || 'music').toLowerCase(); // 'music' (default) or 'all'
@@ -190,6 +211,31 @@ export async function GET(request: NextRequest) {
       },
       next: { revalidate: 0 },
     });
+
+    // If YouTube returned 401 (token expired), auto-refresh and retry once!
+    if (res.status === 401 && session.refreshToken) {
+      try {
+        console.log('YouTube API returned 401. Refreshing token...');
+        const refreshed = await refreshGoogleAccessToken(session.refreshToken);
+        if (refreshed.accessToken) {
+          session.accessToken = refreshed.accessToken;
+          session.expiresAt = Date.now() + refreshed.expiresIn * 1000;
+          if (refreshed.refreshToken) session.refreshToken = refreshed.refreshToken;
+          tokenRefreshed = true;
+
+          // Retry with fresh token
+          res = await fetch(ytApiUrl, {
+            headers: {
+              Authorization: `Bearer ${session.accessToken}`,
+              Accept: 'application/json',
+            },
+            next: { revalidate: 0 },
+          });
+        }
+      } catch (retryErr) {
+        console.warn('Token refresh on 401 failed:', retryErr);
+      }
+    }
 
     let data = await res.json();
 
@@ -312,7 +358,7 @@ export async function GET(request: NextRequest) {
       })
       .filter((t: TrackData | null): t is TrackData => t !== null);
 
-    return NextResponse.json({
+    const jsonResponse = NextResponse.json({
       connected: true,
       user: session.user,
       tracks,
@@ -322,6 +368,13 @@ export async function GET(request: NextRequest) {
       nextPageToken: data.nextPageToken || null,
       totalResults: data.pageInfo?.totalResults || tracks.length,
     });
+
+    if (tokenRefreshed) {
+      const isSecure = process.env.NODE_ENV === 'production';
+      setSessionCookieOnResponse(jsonResponse, session, isSecure);
+    }
+
+    return jsonResponse;
   } catch (error: any) {
     console.error('Error fetching YouTube liked songs:', error);
     return NextResponse.json(

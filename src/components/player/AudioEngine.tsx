@@ -550,7 +550,6 @@ export const AudioEngine: React.FC = () => {
       try {
         audio.pause();
         audio.currentTime = 0;
-        audio.src = '';
       } catch {}
     }
     if (ytPlayerRef.current) {
@@ -869,28 +868,24 @@ export const AudioEngine: React.FC = () => {
 
     const handleError = async () => {
       if (isYtModeRef.current) return;
+      // Ignore errors when src is empty, undefined, or during resetting
+      if (!audio.src || audio.src === '' || audio.src === window.location.href) {
+        return;
+      }
+      // Ignore transient errors while actively resolving a new track
+      if (usePlayerStore.getState().isLoading && retryCountRef.current === 0) {
+        return;
+      }
+
       console.warn('Audio playback error encountered:', audio.error);
       setIsLoading(false);
 
       const ytId = extractYouTubeId(currentTrack) || (audio.src ? extractYouTubeId({ streamUrl: audio.src }) : null);
 
-      // On mobile devices (iOS Safari / Android), native <audio> is the ONLY player that supports background lockscreen playback.
-      // If a connection drops, retry direct stream with a fresh 307 redirect up to 2 times before giving up.
-      if (ytId && retryCountRef.current < 2) {
-        retryCountRef.current += 1;
-        console.log(`Retrying direct YouTube stream for ${ytId} (attempt ${retryCountRef.current})...`);
-        const retryUrl = `/api/stream/yt?v=${ytId}&refresh=1&t=${Date.now()}`;
-        if (audio) {
-          audio.src = retryUrl;
-          audio.load();
-          audio.play().catch(() => {});
-        }
-        return;
-      }
-
+      // 1. First priority: Attempt studio lossless recovery via catalog resolver
       if (retryCountRef.current === 0 && currentTrack) {
         retryCountRef.current += 1;
-        console.log(`Attempting stream recovery for track: ${currentTrack.title}`);
+        console.log(`Attempting studio stream recovery for track: ${currentTrack.title}`);
         try {
           const freshUrl = await resolveTrackUrl(currentTrack, true);
           if (freshUrl && audio && freshUrl !== audio.src) {
@@ -905,7 +900,7 @@ export const AudioEngine: React.FC = () => {
         }
       }
 
-      // Fallback to client YouTube player if direct audio stream failed
+      // 2. Second priority: If on desktop or non-mobile, try client YouTube player
       if (ytId) {
         console.log(`Direct audio stream failed for ${ytId}. Falling back to client YouTube player.`);
         directStreamFailedRef.current = true;
